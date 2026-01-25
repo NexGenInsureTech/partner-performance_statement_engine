@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Partner Performance Statement Engine</title>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.29/dist/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+    <style>
+      body {
+        background: #f7f9fc;
+        padding: 24px;
+      }
+      .card {
+        border-radius: 12px;
+      }
+      .progress {
+        height: 22px;
+      }
+      iframe {
+        width: 100%;
+        height: 320px;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h3>Partner Performance Statement Engine</h3>
+
+    <div class="card p-3 mb-3">
+      <h5>1) Upload Registers</h5>
+      <input id="premiumFile" type="file" class="form-control mb-2" />
+      <input id="commissionFile" type="file" class="form-control mb-2" />
+      <input
+        id="statementTill"
+        class="form-control mb-2"
+        placeholder="Statement till (e.g. Mar-25)"
+      />
+      <button id="loadBtn" class="btn btn-primary">Load Excel</button>
+
+      <div class="progress mt-3">
+        <div id="progressBar" class="progress-bar" style="width: 0%">0%</div>
+      </div>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <h5>2) Column Mapping</h5>
+      <div id="mappingUI"></div>
+      <button id="processBtn" class="btn btn-success mt-2">Process Data</button>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <h5>3) Preview</h5>
+      <select id="partnerSelect" class="form-select mb-2"></select>
+      <button id="previewPdfBtn" class="btn btn-outline-primary">
+        Preview PDF
+      </button>
+    </div>
+
+    <div class="card p-3">
+      <h5>4) Bulk</h5>
+      <button id="bulkBtn" class="btn btn-outline-success">Generate ZIP</button>
+    </div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        /* ================= CONFIG ================= */
+
+        const BRAND = {
+          name: "USGI – SME & Insurance Inclusion",
+          logoBase64: null,
+          footer: "Confidential | For intended recipient only",
+        };
+
+        const INTERMEDIARY_MASTER = {
+          "ABC BROKERS": {
+            code: "INT-001",
+            category: "Gold",
+            branches: [
+              { name: "Mumbai", rm: "Rohit Sharma" },
+              { name: "Pune", rm: "Neha Kulkarni" },
+            ],
+          },
+        };
+
+        /* ================= STATE ================= */
+
+        const progressBar = document.getElementById("progressBar");
+        const mappingUI = document.getElementById("mappingUI");
+        const partnerSelect = document.getElementById("partnerSelect");
+
+        let premiumRowsRaw = [];
+        let commissionRowsRaw = [];
+        let columnMap = {};
+        let SNAPSHOTS = [];
+        let STATEMENT_TILL = "";
+
+        /* ================= UTILS ================= */
+
+        function setProgress(p) {
+          progressBar.style.width = p + "%";
+          progressBar.textContent = p + "%";
+          return new Promise((r) => requestAnimationFrame(r));
+        }
+
+        async function readSheet(file) {
+          const wb = XLSX.read(await file.arrayBuffer());
+          return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
+            defval: "",
+          });
+        }
+
+        /* ================= COLUMN MAPPING ================= */
+
+        function buildMapping(headers) {
+          const fields = [
+            "intermediary",
+            "month",
+            "lob",
+            "product",
+            "policies",
+            "premium",
+            "commission",
+          ];
+          mappingUI.innerHTML = "";
+
+          fields.forEach((f) => {
+            const sel = document.createElement("select");
+            sel.className = "form-select mb-2";
+            headers.forEach((h) => {
+              const o = document.createElement("option");
+              o.value = h;
+              o.textContent = h;
+              sel.appendChild(o);
+            });
+            columnMap[f] = headers[0];
+            sel.onchange = () => (columnMap[f] = sel.value);
+            mappingUI.append(f + ":");
+            mappingUI.appendChild(sel);
+          });
+        }
+
+        /* ================= NORMALIZE ================= */
+
+        function normalize(rows) {
+          return rows.map((r) => ({
+            intermediary: r[columnMap.intermediary],
+            month: String(r[columnMap.month]).slice(0, 7),
+            lob: r[columnMap.lob],
+            product: r[columnMap.product],
+            policies: +r[columnMap.policies] || 0,
+            premium: +r[columnMap.premium] || 0,
+            commission: +r[columnMap.commission] || 0,
+          }));
+        }
+
+        /* ================= AGGREGATE ================= */
+
+        function buildSnapshots(rows) {
+          const map = {};
+
+          rows.forEach((r) => {
+            if (!map[r.intermediary]) {
+              const master = INTERMEDIARY_MASTER[r.intermediary] || {};
+              map[r.intermediary] = {
+                meta: {
+                  partner_name: r.intermediary,
+                  partner_code: master.code || "—",
+                  category: master.category || "—",
+                  branches: master.branches || [],
+                  statement_till: STATEMENT_TILL,
+                },
+                totals: { premium: 0, commission: 0, policies: 0 },
+                month_wise: {},
+                product_summary: {},
+              };
+            }
+
+            const p = map[r.intermediary];
+            p.totals.premium += r.premium;
+            p.totals.commission += r.commission;
+            p.totals.policies += r.policies;
+
+            if (!p.month_wise[r.month])
+              p.month_wise[r.month] = {
+                month: r.month,
+                premium: 0,
+                commission: 0,
+                policies: 0,
+              };
+            p.month_wise[r.month].premium += r.premium;
+            p.month_wise[r.month].commission += r.commission;
+            p.month_wise[r.month].policies += r.policies;
+
+            if (!p.product_summary[r.product])
+              p.product_summary[r.product] = { product: r.product, premium: 0 };
+            p.product_summary[r.product].premium += r.premium;
+          });
+
+          return Object.values(map).map((p) => {
+            const total = p.totals.premium || 1;
+            return {
+              meta: p.meta,
+              totals: p.totals,
+              month_wise: Object.values(p.month_wise),
+              product_summary: Object.values(p.product_summary).map((x) => ({
+                product: x.product,
+                premium: x.premium,
+                share_pct: +((x.premium * 100) / total).toFixed(2),
+              })),
+            };
+          });
+        }
+
+        /* ================= PDF ================= */
+
+        function renderPdf(s) {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF();
+          const W = doc.internal.pageSize.getWidth();
+          const H = doc.internal.pageSize.getHeight();
+          let y = 18;
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(14);
+          doc.text(BRAND.name, 15, y);
+          doc.setFontSize(10);
+          doc.text("Partner Performance Statement", 15, y + 6);
+          doc.text(`Statement till: ${s.meta.statement_till}`, W - 15, y + 6, {
+            align: "right",
+          });
+
+          y += 18;
+
+          doc.rect(15, y, W - 30, 22);
+          doc.setFontSize(10);
+          doc.text(`Intermediary: ${s.meta.partner_name}`, 18, y + 7);
+          doc.text(`Code: ${s.meta.partner_code}`, 18, y + 13);
+          doc.text(`Category: ${s.meta.category}`, W / 2, y + 7);
+
+          const branchText = s.meta.branches
+            .map((b) => `${b.name} (RM: ${b.rm})`)
+            .join(" | ");
+          doc.text(`Branches/RM: ${branchText || "—"}`, W / 2, y + 13);
+
+          y += 32;
+
+          const letter = `Dear ${s.meta.partner_name},
+
+Thank you for your continued partnership with ${BRAND.name}.
+Please find below your business performance summary.
+
+Warm regards,
+${BRAND.name}`;
+
+          doc.setFontSize(11);
+          doc.text(doc.splitTextToSize(letter, W - 30), 15, y);
+
+          doc.addPage();
+          y = 18;
+
+          doc.setFontSize(13);
+          doc.text("Business Summary", 15, y);
+          y += 10;
+
+          doc.setFontSize(11);
+          doc.text(
+            `Total Premium: ${s.totals.premium.toLocaleString()}`,
+            15,
+            y,
+          );
+          doc.text(
+            `Total Commission: ${s.totals.commission.toLocaleString()}`,
+            80,
+            y,
+          );
+          doc.text(`Policies: ${s.totals.policies}`, 150, y);
+
+          y += 8;
+
+          doc.autoTable({
+            startY: y,
+            margin: { left: 15, right: 15 },
+            head: [["Month", "Premium", "Commission", "Policies"]],
+            body: s.month_wise.map((m) => [
+              m.month,
+              m.premium.toLocaleString(),
+              m.commission.toLocaleString(),
+              m.policies,
+            ]),
+          });
+
+          doc.addPage();
+          y = 18;
+
+          doc.setFontSize(13);
+          doc.text("Portfolio Mix & Insights", 15, y);
+          y += 8;
+
+          doc.autoTable({
+            startY: y,
+            margin: { left: 15, right: 15 },
+            head: [["Product", "Premium", "Share %"]],
+            body: s.product_summary
+              .sort((a, b) => b.premium - a.premium)
+              .map((p) => [
+                p.product,
+                p.premium.toLocaleString(),
+                p.share_pct + "%",
+              ]),
+          });
+
+          const top = s.product_summary.sort(
+            (a, b) => b.premium - a.premium,
+          )[0];
+          const insight = top
+            ? `Your highest contributing product is ${top.product}, accounting for ${top.share_pct}% of total premium.`
+            : "Portfolio distribution is balanced.";
+
+          doc.setFontSize(10);
+          doc.text("Insight:", 15, doc.lastAutoTable.finalY + 10);
+          doc.text(
+            doc.splitTextToSize(insight, W - 30),
+            15,
+            doc.lastAutoTable.finalY + 16,
+          );
+
+          const pages = doc.getNumberOfPages();
+          for (let i = 1; i <= pages; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.text(BRAND.footer, 15, H - 10);
+            doc.text(`Page ${i} of ${pages}`, W - 15, H - 10, {
+              align: "right",
+            });
+          }
+
+          return doc;
+        }
+
+        /* ================= UI FLOW ================= */
+
+        document.getElementById("loadBtn").onclick = async () => {
+          await setProgress(10);
+          STATEMENT_TILL =
+            document.getElementById("statementTill").value || "—";
+          premiumRowsRaw = await readSheet(premiumFile.files[0]);
+          commissionRowsRaw = await readSheet(commissionFile.files[0]);
+
+          const headers = Array.from(
+            new Set(
+              Object.keys(premiumRowsRaw[0] || {}).concat(
+                Object.keys(commissionRowsRaw[0] || {}),
+              ),
+            ),
+          );
+          buildMapping(headers);
+          await setProgress(40);
+        };
+
+        document.getElementById("processBtn").onclick = async () => {
+          await setProgress(60);
+          const rows = normalize(premiumRowsRaw.concat(commissionRowsRaw));
+          SNAPSHOTS = buildSnapshots(rows);
+          partnerSelect.innerHTML = "";
+          SNAPSHOTS.forEach((s, i) => {
+            const o = document.createElement("option");
+            o.value = i;
+            o.textContent = s.meta.partner_name;
+            partnerSelect.appendChild(o);
+          });
+          await setProgress(100);
+        };
+
+        document.getElementById("previewPdfBtn").onclick = () => {
+          const s = SNAPSHOTS[partnerSelect.value];
+          window.open(renderPdf(s).output("bloburl"));
+        };
+
+        document.getElementById("bulkBtn").onclick = async () => {
+          const zip = new JSZip();
+          for (let i = 0; i < SNAPSHOTS.length; i++) {
+            await setProgress(Math.round((i / SNAPSHOTS.length) * 100));
+            zip.file(
+              SNAPSHOTS[i].meta.partner_name + ".pdf",
+              renderPdf(SNAPSHOTS[i]).output("arraybuffer"),
+            );
+          }
+          window.open(
+            URL.createObjectURL(await zip.generateAsync({ type: "blob" })),
+          );
+        };
+      })();
+    </script>
+  </body>
+</html>
