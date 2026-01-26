@@ -74,6 +74,38 @@
       (function () {
         "use strict";
 
+        const CHART_COLORS = [
+          "#4F81BD",
+          "#C0504D",
+          "#9BBB59",
+          "#8064A2",
+          "#4BACC6",
+          "#F79646",
+        ];
+
+        /* ================= LOSS RATIO THRESHOLDS ================= */
+
+        // const LOSS_RATIO_THRESHOLDS = {
+        //   Gold: 10,
+        //   Silver: 15,
+        //   Bronze: 20,
+        // };
+
+        const LOSS_RATIO_THRESHOLDS = {
+          GOOD: { max: 60, color: "#9BBB59", label: "Healthy" },
+          WATCH: { max: 80, color: "#F79646", label: "Watchlist" },
+          POOR: { max: Infinity, color: "#C0504D", label: "High Risk" },
+        };
+
+        function classifyLossRatio(value) {
+          if (value === null || isNaN(value)) return null;
+          if (value <= LOSS_RATIO_THRESHOLDS.GOOD.max)
+            return LOSS_RATIO_THRESHOLDS.GOOD;
+          if (value <= LOSS_RATIO_THRESHOLDS.WATCH.max)
+            return LOSS_RATIO_THRESHOLDS.WATCH;
+          return LOSS_RATIO_THRESHOLDS.POOR;
+        }
+
         /* ================= CONFIG ================= */
 
         const BRAND = {
@@ -131,6 +163,7 @@
             "policies",
             "premium",
             "commission",
+            "loss_ratio", // OPTIONAL
           ];
           mappingUI.innerHTML = "";
 
@@ -161,6 +194,9 @@
             policies: +r[columnMap.policies] || 0,
             premium: +r[columnMap.premium] || 0,
             commission: +r[columnMap.commission] || 0,
+            loss_ratio: columnMap.loss_ratio
+              ? +r[columnMap.loss_ratio] || 0
+              : null,
           }));
         }
 
@@ -180,43 +216,82 @@
                   branches: master.branches || [],
                   statement_till: STATEMENT_TILL,
                 },
-                totals: { premium: 0, commission: 0, policies: 0 },
+                totals: {
+                  premium: 0,
+                  commission: 0,
+                  policies: 0,
+                  loss_ratio_sum: 0,
+                  loss_ratio_count: 0,
+                },
                 month_wise: {},
                 product_summary: {},
               };
             }
 
             const p = map[r.intermediary];
+
+            // Totals
             p.totals.premium += r.premium;
             p.totals.commission += r.commission;
             p.totals.policies += r.policies;
 
-            if (!p.month_wise[r.month])
+            if (r.loss_ratio !== null && !isNaN(r.loss_ratio)) {
+              p.totals.loss_ratio_sum += r.loss_ratio;
+              p.totals.loss_ratio_count++;
+            }
+
+            // Month-wise
+            if (!p.month_wise[r.month]) {
               p.month_wise[r.month] = {
                 month: r.month,
                 premium: 0,
                 commission: 0,
                 policies: 0,
+                loss_ratio: null,
               };
+            }
+
             p.month_wise[r.month].premium += r.premium;
             p.month_wise[r.month].commission += r.commission;
             p.month_wise[r.month].policies += r.policies;
 
-            if (!p.product_summary[r.product])
+            if (r.loss_ratio !== null && !isNaN(r.loss_ratio)) {
+              p.month_wise[r.month].loss_ratio = r.loss_ratio;
+            }
+
+            // Product summary
+            if (!p.product_summary[r.product]) {
               p.product_summary[r.product] = { product: r.product, premium: 0 };
+            }
+
             p.product_summary[r.product].premium += r.premium;
           });
 
           return Object.values(map).map((p) => {
-            const total = p.totals.premium || 1;
+            const totalPremium = p.totals.premium || 1;
+
             return {
               meta: p.meta,
-              totals: p.totals,
+
+              totals: {
+                premium: p.totals.premium,
+                commission: p.totals.commission,
+                policies: p.totals.policies,
+              },
+
+              avg_loss_ratio:
+                p.totals.loss_ratio_count > 0
+                  ? +(
+                      p.totals.loss_ratio_sum / p.totals.loss_ratio_count
+                    ).toFixed(2)
+                  : null,
+
               month_wise: Object.values(p.month_wise),
+
               product_summary: Object.values(p.product_summary).map((x) => ({
                 product: x.product,
                 premium: x.premium,
-                share_pct: +((x.premium * 100) / total).toFixed(2),
+                share_pct: +((x.premium * 100) / totalPremium).toFixed(2),
               })),
             };
           });
@@ -275,19 +350,78 @@
           const canvas = document.createElement("canvas");
           canvas.width = 300;
           canvas.height = 300;
+
           const ctx = canvas.getContext("2d");
+          const cx = 150;
+          const cy = 150;
+          const radius = 120;
 
-          const total = items.reduce((s, i) => s + i.value, 0) || 1;
-          let start = 0;
+          const total = items.reduce((s, i) => s + (i.value || 0), 0) || 1;
+          let startAngle = 0;
 
-          items.forEach((i, idx) => {
-            const angle = (i.value / total) * Math.PI * 2;
+          items.forEach((item, idx) => {
+            const value = item.value || 0;
+            const angle = (value / total) * Math.PI * 2;
+
             ctx.beginPath();
-            ctx.moveTo(150, 150);
-            ctx.fillStyle = `hsl(${idx * 60},70%,60%)`;
-            ctx.arc(150, 150, 120, start, start + angle);
+            ctx.moveTo(cx, cy);
+            ctx.fillStyle = CHART_COLORS[idx % CHART_COLORS.length];
+            ctx.arc(cx, cy, radius, startAngle, startAngle + angle);
+            ctx.closePath();
             ctx.fill();
-            start += angle;
+
+            startAngle += angle;
+          });
+
+          return canvas.toDataURL("image/png");
+        }
+
+        // ================== LOSS RATIO TREND CHART (LINE) ================= */
+        function renderLineChart(labels, data) {
+          const canvas = document.createElement("canvas");
+          canvas.width = 500;
+          canvas.height = 250;
+
+          const ctx = canvas.getContext("2d");
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          const valid = data.filter((v) => v !== null);
+          if (!valid.length) return canvas.toDataURL("image/png");
+
+          const max = Math.max(...valid);
+          const min = Math.min(...valid);
+
+          const padding = 40;
+          const chartHeight = 160;
+          const chartWidth = 400;
+
+          const avg = valid.reduce((s, v) => s + v, 0) / valid.length;
+          const lrClass = classifyLossRatio(avg);
+
+          ctx.strokeStyle = lrClass ? lrClass.color : "#666";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+
+          data.forEach((v, i) => {
+            if (v === null) return;
+
+            const x = padding + (i / (data.length - 1)) * chartWidth;
+            const y =
+              padding +
+              chartHeight -
+              ((v - min) / (max - min || 1)) * chartHeight;
+
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          });
+
+          ctx.stroke();
+
+          ctx.font = "10px Arial";
+          ctx.fillText("Loss Ratio (%)", 10, 20);
+
+          labels.forEach((l, i) => {
+            const x = padding + (i / (labels.length - 1)) * chartWidth;
+            ctx.fillText(l, x - 10, padding + chartHeight + 14);
           });
 
           return canvas.toDataURL("image/png");
@@ -359,16 +493,38 @@ ${BRAND.name}`;
 
           y += 8;
 
+          const showLossRatio = s.avg_loss_ratio !== null;
+
           doc.autoTable({
             startY: y,
             margin: { left: 15, right: 15 },
-            head: [["Month", "Premium", "Commission", "Policies"]],
-            body: s.month_wise.map((m) => [
-              m.month,
-              m.premium.toLocaleString(),
-              m.commission.toLocaleString(),
-              m.policies,
-            ]),
+            head: [
+              showLossRatio
+                ? [
+                    "Month",
+                    "Premium",
+                    "Commission",
+                    "Policies",
+                    "Loss Ratio (%)",
+                  ]
+                : ["Month", "Premium", "Commission", "Policies"],
+            ],
+            body: s.month_wise.map((m) =>
+              showLossRatio
+                ? [
+                    m.month,
+                    m.premium.toLocaleString(),
+                    m.commission.toLocaleString(),
+                    m.policies,
+                    m.loss_ratio !== null ? m.loss_ratio + "%" : "—",
+                  ]
+                : [
+                    m.month,
+                    m.premium.toLocaleString(),
+                    m.commission.toLocaleString(),
+                    m.policies,
+                  ],
+            ),
           });
 
           doc.addPage();
@@ -386,6 +542,21 @@ ${BRAND.name}`;
           const barChartImg = renderBarChart(months, premiums);
           doc.addImage(barChartImg, "PNG", 15, y, 160, 60);
           y += 70;
+
+          if (s.avg_loss_ratio !== null) {
+            const lrLabels = s.month_wise.map((m) => m.month);
+            const lrValues = s.month_wise.map((m) =>
+              m.loss_ratio !== null ? m.loss_ratio : null,
+            );
+
+            const lrChartImg = renderLineChart(lrLabels, lrValues);
+            doc.addImage(lrChartImg, "PNG", 15, y, 160, 55);
+
+            doc.setFontSize(10);
+            doc.text("Loss Ratio Trend (%)", 15, y - 4);
+
+            y += 65;
+          }
 
           /* ===== Product Mix (Pie Chart) ===== */
 
