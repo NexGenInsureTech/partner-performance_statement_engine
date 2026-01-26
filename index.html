@@ -85,12 +85,6 @@
 
         /* ================= LOSS RATIO THRESHOLDS ================= */
 
-        // const LOSS_RATIO_THRESHOLDS = {
-        //   Gold: 10,
-        //   Silver: 15,
-        //   Bronze: 20,
-        // };
-
         const LOSS_RATIO_THRESHOLDS = {
           GOOD: { max: 60, color: "#9BBB59", label: "Healthy" },
           WATCH: { max: 80, color: "#F79646", label: "Watchlist" },
@@ -106,11 +100,68 @@
           return LOSS_RATIO_THRESHOLDS.POOR;
         }
 
+        /* ================= LOSS RATIO ALERTS ================= */
+
+        function generateLossRatioAlerts(months) {
+          const alerts = [];
+          if (!months || months.length < 2) return alerts;
+
+          // Sort months chronologically (YYYY-MM safe)
+          const sorted = [...months].sort((a, b) =>
+            a.month.localeCompare(b.month),
+          );
+
+          // Check breaches & trends
+          for (let i = 0; i < sorted.length; i++) {
+            const curr = sorted[i];
+            if (curr.loss_ratio === null) continue;
+
+            const cls = classifyLossRatio(curr.loss_ratio);
+
+            // 🔴 Breach
+            if (cls && cls.label === "High Risk") {
+              alerts.push({
+                type: "BREACH",
+                icon: "🔴",
+                message: `Loss ratio breached ${LOSS_RATIO_THRESHOLDS.WATCH.max}% in ${curr.month} (${curr.loss_ratio}%).`,
+              });
+            }
+
+            // 🟢 Recovery
+            if (i > 0 && sorted[i - 1].loss_ratio !== null) {
+              const prev = sorted[i - 1];
+              if (curr.loss_ratio < prev.loss_ratio) {
+                alerts.push({
+                  type: "RECOVERY",
+                  icon: "🟢",
+                  message: `Loss ratio improved from ${prev.loss_ratio}% to ${curr.loss_ratio}% in ${curr.month}.`,
+                });
+              }
+            }
+
+            // 🟠 Watchlist (2 consecutive months)
+            if (
+              i > 0 &&
+              cls &&
+              cls.label === "Watchlist" &&
+              classifyLossRatio(sorted[i - 1].loss_ratio)?.label === "Watchlist"
+            ) {
+              alerts.push({
+                type: "WATCH",
+                icon: "🟠",
+                message: `Loss ratio remained in watchlist zone for consecutive months ending ${curr.month}.`,
+              });
+            }
+          }
+
+          return alerts;
+        }
+
         /* ================= CONFIG ================= */
 
         const BRAND = {
-          name: "USGI – SME & Insurance Inclusion",
-          logoBase64: null,
+          name: "SME & Insurance Inclusion",
+          // logoBase64: "PASTE_BASE64_STRING_HERE",
           footer: "Confidential | For intended recipient only",
         };
 
@@ -125,6 +176,124 @@
           },
         };
 
+        /* ================= LETTER TEMPLATE ================= */
+
+        const LETTER_TEMPLATE = [
+          { type: "bold", text: "Dear {{partner_name}}," },
+          { type: "spacer" },
+
+          {
+            type: "normal",
+            text: "Thank you for your continued partnership with {{brand_name}}.",
+          },
+          {
+            type: "normal",
+            text: "Please find below your business performance summary.",
+          },
+
+          { type: "spacer" },
+
+          { type: "normal", text: "Warm regards," },
+          { type: "normal", text: "Nikash Kr. Deka," },
+          { type: "bold", text: "{{HEAD}} – {{brand_name}}" },
+        ];
+
+        /* ================= LAYOUT CONSTANTS ================= */
+
+        const PAGE_MARGIN_X = 15;
+        const HEADER_HEIGHT = 32;
+        const FOOTER_HEIGHT = 18;
+
+        function contentStartY() {
+          return HEADER_HEIGHT + 10;
+        }
+
+        function contentEndY(doc) {
+          return doc.internal.pageSize.getHeight() - FOOTER_HEIGHT - 10;
+        }
+
+        /* ================= LOGO LOADER ================= */
+
+        let LOGO_BASE64 = null;
+        let LOGO_READY = false;
+
+        async function loadLogo() {
+          try {
+            const res = await fetch("/assets/usgi.jpg");
+            const blob = await res.blob();
+
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              LOGO_BASE64 = reader.result;
+              LOGO_READY = true;
+              console.log("Logo loaded");
+            };
+            reader.readAsDataURL(blob);
+          } catch (e) {
+            console.warn("Logo could not be loaded:", e);
+          }
+        }
+
+        // Call once during app bootstrap
+        loadLogo();
+
+        /* ================= HEADER & FOOTER ================= */
+
+        function drawHeader(doc) {
+          const W = doc.internal.pageSize.getWidth();
+          const M = PAGE_MARGIN_X;
+
+          // Background (optional but recommended)
+          // TODO: Might use later to use for brand-color
+          // doc.setFillColor(255, 255, 255);
+          // doc.rect(0, 0, W, HEADER_HEIGHT, "F");
+
+          // Logo
+          if (LOGO_READY && LOGO_BASE64) {
+            doc.addImage(LOGO_BASE64, "PNG", M, 8, 30, 12); // scale in millimeters
+          }
+
+          // Brand Name
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(12);
+          doc.text(BRAND.name, M + 50, 16);
+
+          // Subtitle
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.text("SME & Insurance Inclusion", M + 50, 22);
+
+          // Document Title (right aligned)
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.setTextColor(0, 0, 100);
+          doc.text("Partner Performance Statement", W - M, 18, {
+            align: "right",
+          });
+
+          // Divider
+          doc.setDrawColor(210);
+          doc.line(M, HEADER_HEIGHT - 4, W - M, HEADER_HEIGHT - 4);
+        }
+
+        function drawFooter(doc, pageNo, totalPages) {
+          const W = doc.internal.pageSize.getWidth();
+          const H = doc.internal.pageSize.getHeight();
+          const M = PAGE_MARGIN_X;
+
+          // Divider
+          doc.setDrawColor(210);
+          doc.line(M, H - FOOTER_HEIGHT + 4, W - M, H - FOOTER_HEIGHT + 4);
+
+          doc.setFontSize(8);
+          doc.setTextColor(120);
+
+          doc.text(BRAND.footer, M, H - 8);
+          doc.text(`Page ${pageNo} of ${totalPages}`, W - M, H - 8, {
+            align: "right",
+          });
+        }
+
         /* ================= STATE ================= */
 
         const progressBar = document.getElementById("progressBar");
@@ -138,6 +307,45 @@
         let STATEMENT_TILL = "";
 
         /* ================= UTILS ================= */
+
+        /* ================= LETTER RENDERER ================= */
+
+        function renderLetterBlock(
+          doc,
+          template,
+          context,
+          x,
+          startY,
+          maxWidth,
+        ) {
+          let y = startY;
+
+          template.forEach((block) => {
+            if (block.type === "spacer") {
+              y += 6;
+              return;
+            }
+
+            // Resolve placeholders
+            const text = block.text
+              .replaceAll("{{partner_name}}", context.partner_name || "")
+              .replaceAll("{{brand_name}}", context.brand_name || "");
+
+            // Font style
+            doc.setFont("helvetica", block.type === "bold" ? "bold" : "normal");
+            doc.setFontSize(11);
+
+            const lines = doc.splitTextToSize(text, maxWidth);
+            doc.text(lines, x, y);
+
+            y += lines.length * 6;
+          });
+
+          // Reset font (IMPORTANT)
+          doc.setFont("helvetica", "normal");
+
+          return y;
+        }
 
         function setProgress(p) {
           progressBar.style.width = p + "%";
@@ -434,70 +642,173 @@
           const doc = new jsPDF();
           const W = doc.internal.pageSize.getWidth();
           const H = doc.internal.pageSize.getHeight();
-          let y = 18;
+
+          const MARGIN_X = 15;
+          const CONTENT_W = W - MARGIN_X * 2;
+          let y = contentStartY();
+
+          /* ================= EXECUTIVE SUMMARY ================= */
+
+          const alerts = generateLossRatioAlerts(s.month_wise);
+          const lrClass = classifyLossRatio(s.avg_loss_ratio);
+
+          let riskLabel = "Not Available";
+          let riskColor = "#999";
+
+          if (lrClass) {
+            riskLabel = lrClass.label;
+            riskColor = lrClass.color;
+          }
 
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(14);
-          doc.text(BRAND.name, 15, y);
-          doc.setFontSize(10);
-          doc.text("Partner Performance Statement", 15, y + 6);
-          doc.text(`Statement till: ${s.meta.statement_till}`, W - 15, y + 6, {
-            align: "right",
-          });
-
-          y += 18;
-
-          doc.rect(15, y, W - 30, 22);
-          doc.setFontSize(10);
-          doc.text(`Intermediary: ${s.meta.partner_name}`, 18, y + 7);
-          doc.text(`Code: ${s.meta.partner_code}`, 18, y + 13);
-          doc.text(`Category: ${s.meta.category}`, W / 2, y + 7);
-
-          const branchText = s.meta.branches
-            .map((b) => `${b.name} (RM: ${b.rm})`)
-            .join(" | ");
-          doc.text(`Branches/RM: ${branchText || "—"}`, W / 2, y + 13);
-
-          y += 32;
-
-          const letter = `Dear ${s.meta.partner_name},
-
-Thank you for your continued partnership with ${BRAND.name}.
-Please find below your business performance summary.
-
-Warm regards,
-${BRAND.name}`;
-
           doc.setFontSize(11);
-          doc.text(doc.splitTextToSize(letter, W - 30), 15, y);
+          doc.text("Executive Summary", MARGIN_X, y);
+
+          y += 6;
+
+          doc.setFillColor(riskColor);
+          doc.rect(MARGIN_X, y - 4, 4, 4, "F");
+
+          doc.setFont("helvetica", "normal");
+          doc.text(`Overall Risk Status: ${riskLabel}`, MARGIN_X + 8, y);
+
+          y += 6;
+          doc.text(
+            `Average Loss Ratio: ${
+              s.avg_loss_ratio !== null ? s.avg_loss_ratio + "%" : "—"
+            }`,
+            MARGIN_X,
+            y,
+          );
+
+          y += 6;
+          doc.text(`Key Alerts Identified: ${alerts.length}`, MARGIN_X, y);
+
+          y += 8;
+
+          const narrative = !lrClass
+            ? "Insufficient loss ratio data to determine portfolio health."
+            : lrClass.label === "Healthy"
+              ? "Portfolio performance is stable with healthy loss ratios."
+              : lrClass.label === "Watchlist"
+                ? "Portfolio shows early signs of stress and should be monitored closely."
+                : "Portfolio is high risk and requires immediate corrective action.";
+
+          doc.setFontSize(10);
+          doc.text(doc.splitTextToSize(narrative, CONTENT_W), MARGIN_X, y);
+
+          y += 14;
+
+          /* ================= INTERMEDIARY INFO ================= */
+
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "normal");
+
+          const boxX = MARGIN_X;
+          const boxY = y;
+          const boxW = CONTENT_W;
+          const padding = 4;
+
+          const leftX = boxX + padding;
+          const rightX = boxX + boxW / 2 + padding;
+          const maxRightWidth = boxW / 2 - padding * 2;
+
+          // Prepare wrapped Branch text
+          const branchText = s.meta.branches.length
+            ? s.meta.branches.map((b) => `${b.name} (RM: ${b.rm})`).join(" | ")
+            : "—";
+
+          const wrappedBranches = doc.splitTextToSize(
+            `Branches / RM: ${branchText}`,
+            maxRightWidth,
+          );
+
+          // Calculate dynamic box height
+          const baseLines = 2; // Intermediary + Code
+          const rightLines = Math.max(1, wrappedBranches.length);
+          const lineHeight = 6;
+          const boxH = Math.max(
+            (baseLines + rightLines) * lineHeight + padding * 2,
+            22,
+          );
+
+          // Draw box
+          doc.rect(boxX, boxY, boxW, boxH);
+
+          // Left column
+          doc.text(`Intermediary: ${s.meta.partner_name}`, leftX, boxY + 7);
+          doc.text(`Code: ${s.meta.partner_code}`, leftX, boxY + 13);
+
+          // Right column
+          doc.text(`Category: ${s.meta.category}`, rightX, boxY + 7);
+          doc.text(wrappedBranches, rightX, boxY + 13);
+
+          // Move cursor safely
+          y += boxH + 10;
+
+          /* ================= LETTER CONTEXT ================= */
+          const LETTER_CONTEXT = {
+            partner_name: s.meta.partner_name,
+            brand_name: BRAND.name,
+            HEAD: "SME & Insurance Inclusion",
+          };
+
+          /* ---- PAGE BREAK GUARD (LETTER) ---- */
+          if (y + 60 > contentEndY(doc)) {
+            doc.addPage();
+            y = contentStartY();
+          }
+          /* ================= COVER LETTER ================= */
+
+          y = renderLetterBlock(
+            doc,
+            LETTER_TEMPLATE,
+            LETTER_CONTEXT,
+            MARGIN_X,
+            y,
+            CONTENT_W,
+          );
+
+          y += 6; // breathing space after letter
+
+          /* ================= PAGE 2 ================= */
 
           doc.addPage();
-          y = 18;
+          y = contentStartY();
 
           doc.setFontSize(13);
-          doc.text("Business Summary", 15, y);
-          y += 10;
+          doc.setFont("helvetica", "bold");
+          doc.text("Business Summary", MARGIN_X, y);
+          doc.setFont("helvetica", "normal"); // Font reset after bold headings
 
+          y += 10;
           doc.setFontSize(11);
+          doc.setFont("helvetica", "normal");
+
           doc.text(
             `Total Premium: ${s.totals.premium.toLocaleString()}`,
-            15,
+            MARGIN_X,
             y,
           );
           doc.text(
             `Total Commission: ${s.totals.commission.toLocaleString()}`,
-            80,
+            MARGIN_X + 65,
             y,
           );
-          doc.text(`Policies: ${s.totals.policies}`, 150, y);
+          doc.text(`Policies: ${s.totals.policies}`, MARGIN_X + 135, y);
 
           y += 8;
 
           const showLossRatio = s.avg_loss_ratio !== null;
 
+          if (y > contentEndY(doc) - 60) {
+            doc.addPage();
+            y = contentStartY();
+          }
+
           doc.autoTable({
             startY: y,
-            margin: { left: 15, right: 15 },
+            margin: { left: MARGIN_X, right: MARGIN_X },
             head: [
               showLossRatio
                 ? [
@@ -527,48 +838,90 @@ ${BRAND.name}`;
             ),
           });
 
+          /* ================= PAGE 3 ================= */
+
           doc.addPage();
-          y = 18;
-          // ============
+          y = contentStartY();
+
           doc.setFontSize(13);
-          doc.text("Portfolio Mix & Performance Trends", 15, y);
+          doc.setFont("helvetica", "bold");
+          doc.text("Portfolio Mix & Performance Trends", MARGIN_X, y);
+          doc.setFont("helvetica", "normal"); // Font reset after bold headings
+
           y += 8;
 
           /* ===== Monthly Premium Trend (Bar Chart) ===== */
+          const barChartImg = renderBarChart(
+            s.month_wise.map((m) => m.month),
+            s.month_wise.map((m) => m.premium),
+          );
 
-          const months = s.month_wise.map((m) => m.month);
-          const premiums = s.month_wise.map((m) => m.premium);
+          // ---- Ensure space for bar chart ----
+          if (y + 55 > contentEndY(doc)) {
+            doc.addPage();
+            y = contentStartY();
+          }
+          doc.addImage(barChartImg, "PNG", MARGIN_X, y, CONTENT_W, 55);
 
-          const barChartImg = renderBarChart(months, premiums);
-          doc.addImage(barChartImg, "PNG", 15, y, 160, 60);
-          y += 70;
+          y += 65;
 
+          /* ===== Loss Ratio Trend (Line Chart) ===== */
           if (s.avg_loss_ratio !== null) {
-            const lrLabels = s.month_wise.map((m) => m.month);
-            const lrValues = s.month_wise.map((m) =>
-              m.loss_ratio !== null ? m.loss_ratio : null,
+            const lrChartImg = renderLineChart(
+              s.month_wise.map((m) => m.month),
+              s.month_wise.map((m) => m.loss_ratio),
             );
 
-            const lrChartImg = renderLineChart(lrLabels, lrValues);
-            doc.addImage(lrChartImg, "PNG", 15, y, 160, 55);
+            // ---- Ensure space for loss ratio chart ----
+            if (y + 45 > contentEndY(doc)) {
+              doc.addPage();
+              y = contentStartY();
+            }
 
             doc.setFontSize(10);
-            doc.text("Loss Ratio Trend (%)", 15, y - 4);
-
-            y += 65;
+            doc.text("Loss Ratio Trend (%)", MARGIN_X, y - 4);
+            doc.addImage(lrChartImg, "PNG", MARGIN_X, y, CONTENT_W, 45);
+            y += 55;
           }
 
-          /* ===== Product Mix (Pie Chart) ===== */
+          /* ================= ALERTS ================= */
 
-          const pieChartImg = renderPieChart(
+          if (alerts.length) {
+            if (y + 30 > contentEndY(doc)) {
+              doc.addPage();
+              y = contentStartY();
+            }
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(11);
+            doc.text("Key Alerts", MARGIN_X, y);
+            doc.setFont("helvetica", "normal"); // Font reset after bold headings
+            y += 6;
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+
+            alerts.slice(0, 3).forEach((a) => {
+              doc.text(a, MARGIN_X + 2, y);
+              y += 6;
+            });
+
+            y += 6;
+          }
+
+          /* ================= PRODUCT MIX PIE CHARTS ================= */
+          if (y + 70 > contentEndY(doc)) {
+            doc.addPage();
+            y = contentStartY();
+          }
+
+          const pieImg = renderPieChart(
             s.product_summary.map((p) => ({
               label: p.product,
               value: p.premium,
             })),
           );
-          doc.addImage(pieChartImg, "PNG", 15, y, 70, 70);
-
-          /* ===== Insights ===== */
+          doc.addImage(pieImg, "PNG", MARGIN_X, y, 70, 70);
 
           const momSeries = computeMoM(s.month_wise, "premium");
           const bestGrowth = momSeries.reduce(
@@ -581,19 +934,21 @@ ${BRAND.name}`;
             : "Insufficient data available for month-on-month trend analysis.";
 
           doc.setFontSize(10);
-          doc.text("Insights:", 95, y + 10);
-          doc.text(doc.splitTextToSize(insightText, W - 110), 95, y + 16);
+          doc.text("Insights:", MARGIN_X + 80, y + 10);
+          doc.text(
+            doc.splitTextToSize(insightText, CONTENT_W - 80),
+            MARGIN_X + 80,
+            y + 16,
+          );
 
-          // ================
+          /* ================= APPLY HEADER & FOOTER ================= */
 
-          const pages = doc.getNumberOfPages();
-          for (let i = 1; i <= pages; i++) {
+          const totalPages = doc.getNumberOfPages();
+
+          for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
-            doc.setFontSize(8);
-            doc.text(BRAND.footer, 15, H - 10);
-            doc.text(`Page ${i} of ${pages}`, W - 15, H - 10, {
-              align: "right",
-            });
+            drawHeader(doc, i);
+            drawFooter(doc, i, totalPages);
           }
 
           return doc;
