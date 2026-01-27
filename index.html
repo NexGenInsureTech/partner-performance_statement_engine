@@ -222,6 +222,77 @@
           });
         }
 
+        /* ================= ANALYTICS ================= */
+
+        function computeMoM(series, field) {
+          const out = [];
+          for (let i = 1; i < series.length; i++) {
+            const prev = series[i - 1][field] || 0;
+            const curr = series[i][field] || 0;
+            const pct = prev === 0 ? 0 : ((curr - prev) / prev) * 100;
+            out.push({
+              month: series[i].month,
+              growth_pct: +pct.toFixed(2),
+            });
+          }
+          return out;
+        }
+
+        function getTopGrowth(momSeries) {
+          if (!momSeries.length) return null;
+          return momSeries.reduce((a, b) =>
+            b.growth_pct > a.growth_pct ? b : a,
+          );
+        }
+
+        /* ================= CHARTS ================= */
+
+        function renderBarChart(labels, data) {
+          const canvas = document.createElement("canvas");
+          canvas.width = 500;
+          canvas.height = 250;
+          const ctx = canvas.getContext("2d");
+
+          const max = Math.max(...data, 1);
+          const barWidth = 30;
+          const gap = 20;
+          const baseY = 220;
+
+          ctx.font = "10px Arial";
+          data.forEach((v, i) => {
+            const h = (v / max) * 150;
+            const x = 40 + i * (barWidth + gap);
+            ctx.fillStyle = "#4f81bd";
+            ctx.fillRect(x, baseY - h, barWidth, h);
+            ctx.fillStyle = "#000";
+            ctx.fillText(labels[i], x, baseY + 12);
+          });
+
+          return canvas.toDataURL("image/png");
+        }
+
+        function renderPieChart(items) {
+          const canvas = document.createElement("canvas");
+          canvas.width = 300;
+          canvas.height = 300;
+          const ctx = canvas.getContext("2d");
+
+          const total = items.reduce((s, i) => s + i.value, 0) || 1;
+          let start = 0;
+
+          items.forEach((i, idx) => {
+            const angle = (i.value / total) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(150, 150);
+            ctx.fillStyle = `hsl(${idx * 60},70%,60%)`;
+            ctx.arc(150, 150, 120, start, start + angle);
+            ctx.fill();
+            start += angle;
+          });
+
+          return canvas.toDataURL("image/png");
+        }
+
         /* ================= PDF ================= */
 
         function renderPdf(s) {
@@ -302,38 +373,47 @@ ${BRAND.name}`;
 
           doc.addPage();
           y = 18;
-
+          // ============
           doc.setFontSize(13);
-          doc.text("Portfolio Mix & Insights", 15, y);
+          doc.text("Portfolio Mix & Performance Trends", 15, y);
           y += 8;
 
-          doc.autoTable({
-            startY: y,
-            margin: { left: 15, right: 15 },
-            head: [["Product", "Premium", "Share %"]],
-            body: s.product_summary
-              .sort((a, b) => b.premium - a.premium)
-              .map((p) => [
-                p.product,
-                p.premium.toLocaleString(),
-                p.share_pct + "%",
-              ]),
-          });
+          /* ===== Monthly Premium Trend (Bar Chart) ===== */
 
-          const top = s.product_summary.sort(
-            (a, b) => b.premium - a.premium,
-          )[0];
-          const insight = top
-            ? `Your highest contributing product is ${top.product}, accounting for ${top.share_pct}% of total premium.`
-            : "Portfolio distribution is balanced.";
+          const months = s.month_wise.map((m) => m.month);
+          const premiums = s.month_wise.map((m) => m.premium);
+
+          const barChartImg = renderBarChart(months, premiums);
+          doc.addImage(barChartImg, "PNG", 15, y, 160, 60);
+          y += 70;
+
+          /* ===== Product Mix (Pie Chart) ===== */
+
+          const pieChartImg = renderPieChart(
+            s.product_summary.map((p) => ({
+              label: p.product,
+              value: p.premium,
+            })),
+          );
+          doc.addImage(pieChartImg, "PNG", 15, y, 70, 70);
+
+          /* ===== Insights ===== */
+
+          const momSeries = computeMoM(s.month_wise, "premium");
+          const bestGrowth = momSeries.reduce(
+            (a, b) => (b.growth_pct > a.growth_pct ? b : a),
+            momSeries[0],
+          );
+
+          const insightText = bestGrowth
+            ? `Strongest month-on-month premium growth was observed in ${bestGrowth.month} at ${bestGrowth.growth_pct}%.`
+            : "Insufficient data available for month-on-month trend analysis.";
 
           doc.setFontSize(10);
-          doc.text("Insight:", 15, doc.lastAutoTable.finalY + 10);
-          doc.text(
-            doc.splitTextToSize(insight, W - 30),
-            15,
-            doc.lastAutoTable.finalY + 16,
-          );
+          doc.text("Insights:", 95, y + 10);
+          doc.text(doc.splitTextToSize(insightText, W - 110), 95, y + 16);
+
+          // ================
 
           const pages = doc.getNumberOfPages();
           for (let i = 1; i <= pages; i++) {
