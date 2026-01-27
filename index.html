@@ -43,12 +43,20 @@
       <div class="row text-center mb-3">
         <div class="col">
           <div class="fw-bold">Top Partners</div>
-          <select id="dashLimit" class="form-select form-select-sm text-center">
+          <select
+            id="dashLimit"
+            class="form-select form-select-sm text-center mb-1"
+          >
             <option value="5">Top 5</option>
             <option value="10">Top 10</option>
             <option value="20">Top 20</option>
           </select>
+
+          <select id="lobFilter" class="form-select form-select-sm text-center">
+            <option value="ALL">All LOBs</option>
+          </select>
         </div>
+
         <div class="col">
           <div class="fw-bold">Total Premium</div>
           <div id="dashPremium">—</div>

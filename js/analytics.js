@@ -27,3 +27,47 @@ export function generateAlerts(months) {
 
   return alerts;
 }
+
+export function generateInsights(snapshot) {
+  const insights = [];
+
+  // 1️⃣ Loss Ratio Insight
+  if (typeof snapshot.avg_loss_ratio === "number") {
+    if (snapshot.avg_loss_ratio > 80) {
+      insights.push(
+        "Loss ratio is high. Immediate corrective action recommended.",
+      );
+    } else if (snapshot.avg_loss_ratio > 60) {
+      insights.push(
+        "Loss ratio is elevated. Portfolio should be closely monitored.",
+      );
+    } else {
+      insights.push(
+        "Loss ratio is healthy. Current underwriting discipline should continue.",
+      );
+    }
+  } else {
+    insights.push("Loss ratio data is not available for this partner.");
+  }
+
+  // 2️⃣ Premium Trend Insight
+  if (snapshot.month_wise.length >= 2) {
+    const last = snapshot.month_wise.at(-1).premium;
+    const prev = snapshot.month_wise.at(-2).premium;
+
+    if (last > prev) {
+      insights.push("Premium shows positive month-on-month growth.");
+    } else if (last < prev) {
+      insights.push("Premium declined in the most recent month.");
+    }
+  }
+
+  // 3️⃣ LOB Concentration Insight
+  if (snapshot.lobs.length === 1) {
+    insights.push(
+      `Business is concentrated in ${snapshot.lobs[0]} LOB. Diversification may reduce risk.`,
+    );
+  }
+
+  return insights;
+}

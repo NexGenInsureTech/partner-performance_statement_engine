@@ -5,24 +5,44 @@ import { setProgress, readSheet, assert, isEmpty } from "./utils.js";
 import { normalize, mergeRows, buildSnapshots } from "./data.js";
 import { renderPdf } from "./pdf.js";
 
+const AUTO_MAP_RULES = {
+  intermediary: ["intermediary", "broker", "agent", "partner"],
+  month: ["month", "period", "policy month"],
+  lob: ["lob", "line of business", "business line"],
+  product: ["product", "plan", "scheme"],
+  policies: ["policy", "policies", "count"],
+  premium: ["premium", "gwp", "written premium"],
+  commission: ["commission", "brokerage"],
+  loss_ratio: ["loss ratio", "lr"],
+};
+
 console.log("App loaded successfully");
 
 function renderDashboard(snapshots) {
+  const selectedLob = document.getElementById("lobFilter").value;
+
+  const filtered =
+    selectedLob === "ALL"
+      ? snapshots
+      : snapshots.filter((s) => s.lobs.includes(selectedLob));
+
   const limit = parseInt(document.getElementById("dashLimit").value, 10);
 
   let totalPremium = 0;
   let lossSum = 0;
   let lossCount = 0;
 
-  snapshots.forEach((s) => {
+  filtered.forEach((s) => {
     totalPremium += s.totals.premium;
-    if (s.avg_loss_ratio != null) {
+    if (typeof s.avg_loss_ratio === "number") {
       lossSum += s.avg_loss_ratio;
       lossCount++;
     }
   });
 
-  const avgLoss = lossCount > 0 ? (lossSum / lossCount).toFixed(2) + "%" : "—";
+  const avgLoss =
+    lossCount > 0 ? (lossSum / lossCount).toFixed(2) + "%" : "Not Available";
+  document.getElementById("dashLossRatio").textContent = avgLoss;
 
   const highRisk = snapshots
     .filter((s) => s.avg_loss_ratio != null)
@@ -53,11 +73,64 @@ function renderDashboard(snapshots) {
     });
 }
 
+function computeBenchmarks(snapshots) {
+  let premiumSum = 0;
+  let lossSum = 0;
+  let lossCount = 0;
+
+  snapshots.forEach((s) => {
+    premiumSum += s.totals.premium;
+
+    if (typeof s.avg_loss_ratio === "number") {
+      lossSum += s.avg_loss_ratio;
+      lossCount++;
+    }
+  });
+
+  return {
+    avg_premium: premiumSum / snapshots.length,
+    avg_loss_ratio: lossCount ? +(lossSum / lossCount).toFixed(2) : null,
+  };
+}
+
+function populateLobFilter(snapshots) {
+  const select = document.getElementById("lobFilter");
+  select.innerHTML = `<option value="ALL">All LOBs</option>`;
+
+  const lobs = new Set();
+  snapshots.forEach((s) => s.lobs.forEach((l) => lobs.add(l)));
+
+  [...lobs].sort().forEach((lob) => {
+    select.add(new Option(lob, lob));
+  });
+}
+
 document.getElementById("dashLimit").onchange = () => {
   if (state.snapshots.length) {
     renderDashboard(state.snapshots);
   }
 };
+
+document.getElementById("lobFilter").onchange = () => {
+  if (state.snapshots.length) {
+    renderDashboard(state.snapshots);
+  }
+};
+
+function autoDetectField(field, headers) {
+  const rules = AUTO_MAP_RULES[field] || [];
+  const normalizedHeaders = headers.map((h) => ({
+    raw: h,
+    norm: h.toLowerCase(),
+  }));
+
+  for (const rule of rules) {
+    const match = normalizedHeaders.find((h) => h.norm.includes(rule));
+    if (match) return match.raw;
+  }
+
+  return headers[0]; // safe fallback
+}
 
 async function yieldToUI() {
   return new Promise((r) => setTimeout(r, 0));
@@ -115,8 +188,14 @@ document.getElementById("loadBtn").onclick = async () => {
 
     headers.forEach((h) => select.add(new Option(h, h)));
 
-    select.onchange = () => (state.columnMap[field] = select.value);
-    state.columnMap[field] = headers[0];
+    const detected = autoDetectField(field, headers);
+
+    select.value = detected;
+    state.columnMap[field] = detected;
+
+    select.onchange = () => {
+      state.columnMap[field] = select.value;
+    };
 
     mappingUI.append(label, select);
   });
@@ -128,6 +207,7 @@ document.getElementById("processBtn").onclick = async () => {
   assert(Object.keys(state.columnMap).length, "Please load files first.");
 
   const required = ["intermediary", "month", "product", "premium"];
+  const optional = ["loss_ratio"];
   required.forEach((f) =>
     assert(!isEmpty(state.columnMap[f]), `Please map column for "${f}".`),
   );
@@ -144,6 +224,17 @@ document.getElementById("processBtn").onclick = async () => {
   assert(merged.length, "No data after merging files.");
 
   state.snapshots = buildSnapshots(merged, state.statementTill);
+  // compute portfolio benchmarks once
+  const benchmarks = computeBenchmarks(state.snapshots);
+
+  // attach benchmarks to each snapshot
+  state.snapshots.forEach((s) => {
+    s.benchmark = benchmarks;
+  });
+
+  // Populate LOB dropdown
+  populateLobFilter(state.snapshots);
+  // render dashboard
   renderDashboard(state.snapshots);
 
   assert(state.snapshots.length, "No partners found.");

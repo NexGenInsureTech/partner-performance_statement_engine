@@ -2,6 +2,7 @@
 import { BRAND } from "./config.js";
 import { classifyLossRatio, generateAlerts } from "./analytics.js";
 import { renderBarChart, renderLineChart, renderPieChart } from "./charts.js";
+import { generateInsights } from "./analytics.js";
 
 const MARGIN_X = 15;
 const HEADER_HEIGHT = 30;
@@ -111,12 +112,35 @@ export function renderPdf(snapshot) {
 
   doc.text(
     `Average Loss Ratio: ${
-      snapshot.avg_loss_ratio != null ? snapshot.avg_loss_ratio + "%" : "—"
+      typeof snapshot.avg_loss_ratio === "number"
+        ? snapshot.avg_loss_ratio + "%"
+        : "Not Available"
     }`,
     MARGIN_X,
     y,
   );
   y += 6;
+
+  // Benchmark comparison
+  if (
+    snapshot.benchmark?.avg_loss_ratio != null &&
+    typeof snapshot.avg_loss_ratio === "number"
+  ) {
+    const diff = snapshot.avg_loss_ratio - snapshot.benchmark.avg_loss_ratio;
+
+    const benchmarkText =
+      diff > 0
+        ? `Loss ratio is ${diff.toFixed(2)}% higher than portfolio average.`
+        : `Loss ratio is ${Math.abs(diff).toFixed(
+            2,
+          )}% better than portfolio average.`;
+
+    doc.setFontSize(10);
+    doc.text(doc.splitTextToSize(benchmarkText, CONTENT_W), MARGIN_X, y);
+
+    y += doc.splitTextToSize(benchmarkText, CONTENT_W).length * 6 + 2;
+    // spacing after benchmark line
+  }
 
   doc.text(`Key Alerts Identified: ${alerts.length}`, MARGIN_X, y);
   y += 10;
@@ -134,17 +158,45 @@ export function renderPdf(snapshot) {
 
   /* ---- Intermediary Box ---- */
 
-  doc.rect(MARGIN_X, y, CONTENT_W, 20);
-  doc.text(`Intermediary: ${snapshot.meta.partner_name}`, MARGIN_X + 4, y + 7);
-  doc.text(
-    `Statement Till: ${snapshot.meta.statement_till}`,
-    MARGIN_X + 4,
-    y + 13,
+  const boxX = MARGIN_X;
+  const boxY = y;
+  const boxW = CONTENT_W;
+  const padding = 4;
+
+  const leftX = boxX + padding;
+  const rightX = boxX + boxW / 2 + padding;
+  const rightWidth = boxW / 2 - padding * 2;
+
+  // Prepare wrapped branch text
+  const branchText = snapshot.meta.branches?.length
+    ? snapshot.meta.branches.map((b) => `${b.name} (RM: ${b.rm})`).join(" | ")
+    : "—";
+
+  const wrappedBranches = doc.splitTextToSize(
+    `Branches / RM: ${branchText}`,
+
+    rightWidth,
   );
 
-  y += 30;
+  // Calculate dynamic height
+  const lineHeight = 6;
+  const boxH = Math.max(
+    (2 + wrappedBranches.length) * lineHeight + padding * 2,
+    22,
+  );
 
-  /* ---- Letter ---- */
+  // Draw box
+  doc.rect(boxX, boxY, boxW, boxH);
+
+  // Left column
+  doc.text(`Intermediary: ${snapshot.meta.partner_name}`, leftX, boxY + 7);
+  doc.text(`Code: ${snapshot.meta.partner_code || "—"}`, leftX, boxY + 13);
+
+  // Right column
+  doc.text(`Category: ${snapshot.meta.category || "—"}`, rightX, boxY + 7);
+  doc.text(wrappedBranches, rightX, boxY + 13);
+
+  y += boxH + 10;
 
   y = renderLetter(doc, snapshot, y, CONTENT_W);
 
@@ -206,7 +258,7 @@ export function renderPdf(snapshot) {
   doc.addImage(bar, "PNG", MARGIN_X, y, CONTENT_W, 50);
   y += 60;
 
-  if (snapshot.avg_loss_ratio != null) {
+  if (typeof snapshot.avg_loss_ratio === "number") {
     const line = renderLineChart(
       snapshot.month_wise.map((m) => m.month),
       snapshot.month_wise.map((m) => m.loss_ratio),
@@ -224,15 +276,21 @@ export function renderPdf(snapshot) {
   );
   doc.addImage(pie, "PNG", MARGIN_X, y, 70, 70);
 
-  const insight = snapshot.month_wise.length
-    ? `Strongest month-on-month premium growth was observed in ${
-        snapshot.month_wise[snapshot.month_wise.length - 1].month
-      }.`
-    : "Insufficient data for insights.";
+  const insights = generateInsights(snapshot);
 
   doc.setFontSize(10);
   doc.text("Insights:", MARGIN_X + 80, y + 10);
-  doc.text(doc.splitTextToSize(insight, CONTENT_W - 80), MARGIN_X + 80, y + 16);
+
+  doc.text(
+    doc.splitTextToSize(
+      insights.length ? insights.join(" ") : "No insights available.",
+      CONTENT_W - 80,
+    ),
+    MARGIN_X + 80,
+    y + 16,
+  );
+
+  y += 50; // spacing after insights
 
   /* ---- Apply Footer Everywhere ---- */
 
