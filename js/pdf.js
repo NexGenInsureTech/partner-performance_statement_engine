@@ -38,7 +38,7 @@ let LOGO_BASE64 = null;
 let LOGO_READY = false;
 
 async function loadLogo() {
-  const res = await fetch("/assets/logo.jpg");
+  const res = await fetch("./assets/logo.jpg");
   const blob = await res.blob();
 
   const reader = new FileReader();
