@@ -1,0 +1,12 @@
+body {
+  background: #ebcdb4;
+}
+
+.card {
+  border-radius: 12px;
+  background: #ffb085c0;
+}
+
+.progress {
+  height: 22px;
+}
