@@ -6,8 +6,14 @@ import {
   generateInsights,
   lossRatioIndicator,
   generateLobRecommendations,
+  generateLobInsights,
 } from "./analytics.js";
-import { renderBarChart, renderLineChart, renderPieChart } from "./charts.js";
+import {
+  renderBarChart,
+  renderLineChart,
+  renderPieChart,
+  renderLobBarChart,
+} from "./charts.js";
 
 const MARGIN_X = 15;
 const HEADER_HEIGHT = 30;
@@ -314,84 +320,165 @@ export function renderPdf(snapshot) {
   drawSectionDivider(doc, y);
   y += 8;
 
-  /* ===== PAGE 3 : PORTFOLIO & TRENDS ===== */
+  /* ===== PAGE 3 : KEY PERFORMANCE SIGNALS & ACTIONS ===== */
 
   doc.addPage();
   drawHeader(doc);
   y = contentStartY();
 
+  // ==================================================
+  // PAGE TITLE
+  // ==================================================
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text("Portfolio Mix & Performance Trends", MARGIN_X, y);
+  doc.text("Key Performance Signals & Actions", MARGIN_X, y);
   y += 10;
 
-  const bar = renderBarChart(
-    snapshot.month_wise.map((m) => m.month),
-    snapshot.month_wise.map((m) => m.premium),
-  );
-  doc.addImage(bar, "PNG", MARGIN_X, y, CONTENT_W, 50);
-  y += 60;
+  // ==================================================
+  // HERO INSIGHT (MOST IMPORTANT PART)
+  // ==================================================
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
 
+  const heroInsight =
+    typeof snapshot.avg_loss_ratio === "number"
+      ? snapshot.avg_loss_ratio <= 65
+        ? "Loss ratio remains within healthy limits, indicating disciplined underwriting."
+        : "Loss ratio shows stress, primarily driven by adverse LOB performance."
+      : "Insufficient loss ratio data to determine portfolio health.";
+
+  doc.text("Key Signal", MARGIN_X, y);
+  y += 6;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(doc.splitTextToSize(heroInsight, CONTENT_W), MARGIN_X, y);
+  y += 14;
+
+  // Divider
+  doc.setDrawColor(220);
+  doc.line(MARGIN_X, y, MARGIN_X + CONTENT_W, y);
+  y += 8;
+
+  // ==================================================
+  // PRIMARY KPI — LOSS RATIO TREND (RISK FIRST)
+  // ==================================================
   if (typeof snapshot.avg_loss_ratio === "number") {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Loss Ratio Trend (Primary Risk Indicator)", MARGIN_X, y);
+    y += 6;
+
+    doc.setFont("helvetica", "normal");
     const line = renderLineChart(
       snapshot.month_wise.map((m) => m.month),
       snapshot.month_wise.map((m) => m.loss_ratio),
     );
-    doc.text("Loss Ratio Trend (%)", MARGIN_X, y - 4);
     doc.addImage(line, "PNG", MARGIN_X, y, CONTENT_W, 40);
     y += 50;
   }
 
-  const pie = renderPieChart(
-    snapshot.product_summary?.map((p) => ({
-      label: p.product,
-      value: p.premium,
-    })) || [],
+  // Divider
+  doc.setDrawColor(220);
+  doc.line(MARGIN_X, y, MARGIN_X + CONTENT_W, y);
+  y += 8;
+
+  // ==================================================
+  // SUPPORTING KPI — PREMIUM TREND
+  // ==================================================
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Premium Trend (Supporting Indicator)", MARGIN_X, y);
+  y += 6;
+
+  doc.setFont("helvetica", "normal");
+  const bar = renderBarChart(
+    snapshot.month_wise.map((m) => m.month),
+    snapshot.month_wise.map((m) => m.premium),
   );
-  doc.addImage(pie, "PNG", MARGIN_X, y, 70, 70);
+  doc.addImage(bar, "PNG", MARGIN_X, y, CONTENT_W, 40);
+  y += 50;
 
-  const insights = generateInsights(snapshot);
+  // Divider
+  doc.setDrawColor(220);
+  doc.line(MARGIN_X, y, MARGIN_X + CONTENT_W, y);
+  y += 8;
 
+  // ==================================================
+  // ACTIONS REQUIRED (DECISION SECTION)
+  // ==================================================
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Actions Required", MARGIN_X, y);
+  y += 6;
+
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text("Insights:", MARGIN_X + 80, y + 10);
-
-  doc.text(
-    doc.splitTextToSize(
-      insights.length ? insights.join(" ") : "No insights available.",
-      CONTENT_W - 80,
-    ),
-    MARGIN_X + 80,
-    y + 16,
-  );
-
-  y += 50; // spacing after insights
-
-  /* ================= RECOMMENDATIONS ================= */
 
   const recos = generateLobRecommendations(snapshot);
 
   if (recos.length) {
-    if (y + 30 > contentEndY(doc)) {
-      doc.addPage();
-      drawHeader(doc);
-      y = contentStartY();
-    }
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text("Recommendations", MARGIN_X, y);
-    y += 6;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-
     recos.forEach((r) => {
-      doc.text(`- ${r}`, MARGIN_X + 2, y);
+      doc.text(`• ${r}`, MARGIN_X + 2, y);
       y += 6;
     });
-
+  } else {
+    doc.text("No immediate corrective actions required.", MARGIN_X, y);
     y += 6;
   }
+
+  y += 6;
+
+  // ==================================================
+  // PORTFOLIO CONTEXT (DE-EMPHASIZED BUT EXPLAINED)
+  // ==================================================
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Portfolio Context", MARGIN_X, y);
+  y += 6;
+
+  // ==================================================
+  // LOB PERFORMANCE BREAKDOWN (RANKED)
+  // ==================================================
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("LOB Performance Breakdown", MARGIN_X, y);
+  y += 6;
+
+  const lobBar = renderLobBarChart(snapshot.lob_summary);
+  doc.addImage(lobBar, "PNG", MARGIN_X, y, CONTENT_W, 70);
+  y += 80;
+
+  // --- INSIGHTS (RIGHT) ---
+  const rightColX = MARGIN_X + 70;
+  const rightColW = CONTENT_W - 70;
+  let textY = y;
+
+  const lobInsights = generateLobInsights(snapshot);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("LOB Performance Signals", rightColX, textY);
+  textY += 6;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+
+  if (lobInsights.length) {
+    lobInsights.forEach((i) => {
+      doc.text(`• ${i}`, rightColX, textY);
+      textY += 6;
+    });
+  } else {
+    doc.text(
+      "No significant LOB concentration risks identified.",
+      rightColX,
+      textY,
+    );
+  }
+
+  // Move cursor BELOW pie + text block
+  y += Math.max(60, textY - y) + 10;
 
   /* ---- Apply Footer Everywhere ---- */
 

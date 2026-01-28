@@ -7,8 +7,14 @@ import { renderPdf } from "./pdf.js";
 import { lossRatioIndicator } from "./analytics.js";
 import { computeLobMetrics } from "./data.js";
 
+console.log("App loaded successfully");
+
 const AUTO_MAP_RULES = {
   intermediary: ["intermediary", "broker", "agent", "partner"],
+  partner_code: ["partner code", "intermediary code", "code"],
+  category: ["category", "tier", "grade"],
+  branch: ["branch", "location", "office"],
+  rm: ["rm", "relationship manager", "account manager"],
   month: ["month", "period", "policy month"],
   lob: ["lob", "line of business", "business line"],
   product: ["product", "plan", "scheme"],
@@ -18,7 +24,23 @@ const AUTO_MAP_RULES = {
   loss_ratio: ["loss ratio", "lr"],
 };
 
-console.log("App loaded successfully");
+// ================= AUTO-DETECT FUNCTION =================
+
+function autoDetectField(field, headers) {
+  const rules = AUTO_MAP_RULES[field] || [];
+
+  const normalizedHeaders = headers.map((h) => ({
+    raw: h,
+    norm: h.toLowerCase(),
+  }));
+
+  for (const rule of rules) {
+    const match = normalizedHeaders.find((h) => h.norm.includes(rule));
+    if (match) return match.raw;
+  }
+
+  return null; // IMPORTANT: allow manual selection
+}
 
 function renderDashboard(snapshots) {
   const selectedLob = document.getElementById("lobFilter").value;
@@ -26,7 +48,7 @@ function renderDashboard(snapshots) {
   const filtered =
     selectedLob === "ALL"
       ? snapshots
-      : snapshots.filter((s) => s.lobs.includes(selectedLob));
+      : snapshots.filter((s) => s.lob_summary.includes(selectedLob));
 
   const limit = parseInt(document.getElementById("dashLimit").value, 10);
 
@@ -101,12 +123,21 @@ function computeBenchmarks(snapshots) {
 
 function populateLobFilter(snapshots) {
   const select = document.getElementById("lobFilter");
-  select.innerHTML = `<option value="ALL">All LOBs</option>`;
+  if (!select) return;
 
-  const lobs = new Set();
-  snapshots.forEach((s) => s.lobs.forEach((l) => lobs.add(l)));
+  select.innerHTML = `<option value="">All LOBs</option>`;
 
-  [...lobs].sort().forEach((lob) => {
+  const lobSet = new Set();
+
+  snapshots.forEach((s) => {
+    if (!Array.isArray(s.lob_summary)) return;
+
+    s.lob_summary.forEach((l) => {
+      if (l.lob) lobSet.add(l.lob);
+    });
+  });
+
+  [...lobSet].sort().forEach((lob) => {
     select.add(new Option(lob, lob));
   });
 }
@@ -122,21 +153,6 @@ document.getElementById("lobFilter").onchange = () => {
     renderDashboard(state.snapshots);
   }
 };
-
-function autoDetectField(field, headers) {
-  const rules = AUTO_MAP_RULES[field] || [];
-  const normalizedHeaders = headers.map((h) => ({
-    raw: h,
-    norm: h.toLowerCase(),
-  }));
-
-  for (const rule of rules) {
-    const match = normalizedHeaders.find((h) => h.norm.includes(rule));
-    if (match) return match.raw;
-  }
-
-  return headers[0]; // safe fallback
-}
 
 async function yieldToUI() {
   return new Promise((r) => setTimeout(r, 0));
@@ -175,6 +191,10 @@ document.getElementById("loadBtn").onclick = async () => {
 
   const FIELDS = [
     "intermediary",
+    "partner_code",
+    "category",
+    "branch",
+    "rm",
     "month",
     "lob",
     "product",
@@ -186,26 +206,38 @@ document.getElementById("loadBtn").onclick = async () => {
 
   FIELDS.forEach((field) => {
     const label = document.createElement("div");
-    label.textContent = field;
     label.className = "fw-bold mt-2";
+    label.textContent = field;
 
     const select = document.createElement("select");
     select.className = "form-select mb-2";
 
-    headers.forEach((h) => select.add(new Option(h, h)));
+    // ✅ 1. Placeholder FIRST (CRITICAL)
+    select.add(new Option("-- Select column --", ""));
 
+    // ✅ 2. Add all headers
+    headers.forEach((h) => {
+      select.add(new Option(h, h));
+    });
+
+    // ✅ 3. Auto-detect
     const detected = autoDetectField(field, headers);
 
-    select.value = detected;
-    state.columnMap[field] = detected;
+    if (detected) {
+      select.value = detected;
+      state.columnMap[field] = detected;
+    } else {
+      select.value = "";
+      state.columnMap[field] = "";
+    }
 
+    // ✅ 4. Persist user selection
     select.onchange = () => {
       state.columnMap[field] = select.value;
     };
 
     mappingUI.append(label, select);
   });
-
   await setProgress(progressBar, 40);
 };
 

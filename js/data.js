@@ -4,8 +4,15 @@ export function normalize(rows, map) {
   return rows.map((r) => ({
     intermediary: r[map.intermediary],
     month: String(r[map.month]).slice(0, 7),
-    lob: map.lob ? r[map.lob] : "—",
+    lob: map.lob ? r[map.lob] : null,
     product: r[map.product],
+
+    // Business identifiers (NEW)
+    partner_code: map.partner_code ? r[map.partner_code] : null,
+    category: map.category ? r[map.category] : null,
+    branch: map.branch ? r[map.branch] : null,
+    rm: map.rm ? r[map.rm] : null,
+
     policies: +r[map.policies] || 0,
     premium: +r[map.premium] || 0,
     commission: +r[map.commission] || 0,
@@ -44,6 +51,9 @@ export function buildSnapshots(rows, statementTill) {
       map[r.intermediary] = {
         meta: {
           partner_name: r.intermediary,
+          partner_code: r.partner_code || null,
+          category: r.category || null,
+          branches: [],
           statement_till: statementTill,
         },
         totals: {
@@ -54,16 +64,23 @@ export function buildSnapshots(rows, statementTill) {
           loss_ratio_base: 0,
         },
         month_wise: {},
-        lob_set: new Set(),
+        lob_summary: {}, // ✅ NEW
       };
     }
 
     const p = map[r.intermediary];
 
-    if (r.lob) {
-      p.lob_set.add(r.lob);
+    /* ---------- Branch / RM (deduplicated) ---------- */
+    if (r.branch && r.rm) {
+      const exists = p.meta.branches.some(
+        (b) => b.name === r.branch && b.rm === r.rm,
+      );
+      if (!exists) {
+        p.meta.branches.push({ name: r.branch, rm: r.rm });
+      }
     }
 
+    /* ---------- Totals ---------- */
     p.totals.premium += r.premium;
     p.totals.commission += r.commission;
     p.totals.policies += r.policies;
@@ -73,6 +90,7 @@ export function buildSnapshots(rows, statementTill) {
       p.totals.loss_ratio_base += r.premium;
     }
 
+    /* ---------- Month-wise ---------- */
     if (!p.month_wise[r.month]) {
       p.month_wise[r.month] = {
         month: r.month,
@@ -90,8 +108,28 @@ export function buildSnapshots(rows, statementTill) {
     if (r.loss_ratio != null) {
       p.month_wise[r.month].loss_ratio = r.loss_ratio;
     }
+
+    /* ---------- LOB Summary (NEW, CRITICAL) ---------- */
+    if (r.lob) {
+      if (!p.lob_summary[r.lob]) {
+        p.lob_summary[r.lob] = {
+          lob: r.lob,
+          premium: 0,
+          loss_ratio_sum: 0,
+          loss_ratio_count: 0,
+        };
+      }
+
+      p.lob_summary[r.lob].premium += r.premium;
+
+      if (r.loss_ratio != null) {
+        p.lob_summary[r.lob].loss_ratio_sum += r.loss_ratio;
+        p.lob_summary[r.lob].loss_ratio_count++;
+      }
+    }
   });
 
+  /* ---------- Finalize snapshots ---------- */
   return Object.values(map).map((p) => ({
     meta: p.meta,
     totals: {
@@ -99,7 +137,6 @@ export function buildSnapshots(rows, statementTill) {
       commission: p.totals.commission,
       policies: p.totals.policies,
     },
-    lobs: Array.from(p.lob_set),
     avg_loss_ratio:
       p.totals.loss_ratio_base > 0
         ? +(p.totals.loss_ratio_premium / p.totals.loss_ratio_base).toFixed(2)
@@ -107,6 +144,15 @@ export function buildSnapshots(rows, statementTill) {
     month_wise: Object.values(p.month_wise).sort(
       (a, b) => new Date(a.month) - new Date(b.month),
     ),
+    lob_summary: Object.values(p.lob_summary).map((l) => ({
+      lob: l.lob,
+      premium: l.premium,
+      share_pct: +((l.premium * 100) / p.totals.premium).toFixed(2),
+      loss_ratio:
+        l.loss_ratio_count > 0
+          ? +(l.loss_ratio_sum / l.loss_ratio_count).toFixed(2)
+          : null,
+    })),
   }));
 }
 

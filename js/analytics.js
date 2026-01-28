@@ -73,20 +73,18 @@ export function generateInsights(snapshot) {
 }
 
 export function generateLobRecommendations(snapshot) {
+  if (!Array.isArray(snapshot.lob_summary)) return [];
+
   const recos = [];
 
-  snapshot.lobs.forEach((lob) => {
-    if (lob.toLowerCase().includes("motor")) {
+  snapshot.lob_summary.forEach((l) => {
+    if (l.loss_ratio != null && l.loss_ratio > 80) {
       recos.push(
-        "Motor LOB: Focus on claims control and underwriting discipline.",
+        `Reduce exposure in ${l.lob} due to high loss ratio (${l.loss_ratio}%).`,
       );
-    } else if (lob.toLowerCase().includes("health")) {
+    } else if (l.loss_ratio != null && l.loss_ratio < 60) {
       recos.push(
-        "Health LOB: Stable performance observed. Consider scaling with caution.",
-      );
-    } else if (lob.toLowerCase().includes("sme")) {
-      recos.push(
-        "SME LOB: Portfolio diversification and pricing review recommended.",
+        `Consider expanding ${l.lob} as it shows healthy performance.`,
       );
     }
   });
@@ -102,4 +100,29 @@ export function lossRatioIndicator(value) {
   if (value <= 60) return { color: [155, 187, 89], label: "Healthy" };
   if (value <= 80) return { color: [247, 150, 70], label: "Watchlist" };
   return { color: [192, 80, 77], label: "High Risk" };
+}
+
+export function generateLobInsights(snapshot) {
+  if (!snapshot.lob_summary) return [];
+
+  const lobs = snapshot.lob_summary;
+  const insights = [];
+
+  const topPremium = lobs.reduce((a, b) => (b.premium > a.premium ? b : a));
+
+  const worstLR = lobs
+    .filter((l) => l.loss_ratio != null)
+    .reduce((a, b) => (b.loss_ratio > a.loss_ratio ? b : a));
+
+  insights.push(
+    `${topPremium.lob} contributes the highest premium share (${topPremium.share_pct}%).`,
+  );
+
+  if (worstLR) {
+    insights.push(
+      `${worstLR.lob} reports the highest loss ratio at ${worstLR.loss_ratio}%.`,
+    );
+  }
+
+  return insights;
 }
