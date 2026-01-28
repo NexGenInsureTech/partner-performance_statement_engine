@@ -109,3 +109,27 @@ export function buildSnapshots(rows, statementTill) {
     ),
   }));
 }
+
+export function computeLobMetrics(rows) {
+  const map = {};
+
+  rows.forEach((r) => {
+    if (!r.lob || typeof r.loss_ratio !== "number") return;
+
+    if (!map[r.lob]) {
+      map[r.lob] = {
+        premium: 0,
+        weighted_lr: 0,
+      };
+    }
+
+    map[r.lob].premium += r.premium;
+    map[r.lob].weighted_lr += r.loss_ratio * r.premium;
+  });
+
+  return Object.entries(map).map(([lob, v]) => ({
+    lob,
+    avg_loss_ratio:
+      v.premium > 0 ? +(v.weighted_lr / v.premium).toFixed(2) : null,
+  }));
+}

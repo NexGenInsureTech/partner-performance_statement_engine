@@ -4,6 +4,8 @@ import { state } from "./state.js";
 import { setProgress, readSheet, assert, isEmpty } from "./utils.js";
 import { normalize, mergeRows, buildSnapshots } from "./data.js";
 import { renderPdf } from "./pdf.js";
+import { lossRatioIndicator } from "./analytics.js";
+import { computeLobMetrics } from "./data.js";
 
 const AUTO_MAP_RULES = {
   intermediary: ["intermediary", "broker", "agent", "partner"],
@@ -51,8 +53,12 @@ function renderDashboard(snapshots) {
   document.getElementById("dashPremium").textContent =
     totalPremium.toLocaleString();
   document.getElementById("dashLossRatio").textContent = avgLoss;
+  const indicator = highRisk
+    ? lossRatioIndicator(highRisk.avg_loss_ratio)
+    : { icon: "—", label: "" };
+
   document.getElementById("dashHighRisk").textContent = highRisk
-    ? highRisk.meta.partner_name
+    ? `${indicator.icon} ${highRisk.meta.partner_name}`
     : "—";
 
   const tbody = document.getElementById("dashTable");
@@ -207,34 +213,39 @@ document.getElementById("processBtn").onclick = async () => {
   assert(Object.keys(state.columnMap).length, "Please load files first.");
 
   const required = ["intermediary", "month", "product", "premium"];
-  const optional = ["loss_ratio"];
   required.forEach((f) =>
     assert(!isEmpty(state.columnMap[f]), `Please map column for "${f}".`),
   );
 
   await setProgress(progressBar, 60);
 
+  // Normalize both files
   const p = normalize(state.premiumRaw, state.columnMap);
   const c = normalize(state.commissionRaw, state.columnMap);
 
   assert(p.length || c.length, "No valid rows after normalization.");
 
+  // Merge premium + commission
   const merged = mergeRows(p, c);
-
   assert(merged.length, "No data after merging files.");
 
+  // Build partner snapshots
   state.snapshots = buildSnapshots(merged, state.statementTill);
-  // compute portfolio benchmarks once
-  const benchmarks = computeBenchmarks(state.snapshots);
 
-  // attach benchmarks to each snapshot
+  /* ---------- OVERALL BENCHMARK (existing, correct) ---------- */
+  const benchmarks = computeBenchmarks(state.snapshots);
   state.snapshots.forEach((s) => {
     s.benchmark = benchmarks;
   });
 
-  // Populate LOB dropdown
+  /* ---------- LOB-WISE PORTFOLIO BENCHMARK (NEW, REQUIRED) ---------- */
+  const lobBenchmarks = computeLobMetrics(merged);
+  state.snapshots.forEach((s) => {
+    s.lob_benchmarks = lobBenchmarks;
+  });
+
+  /* ---------- UI UPDATES ---------- */
   populateLobFilter(state.snapshots);
-  // render dashboard
   renderDashboard(state.snapshots);
 
   assert(state.snapshots.length, "No partners found.");

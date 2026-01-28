@@ -1,12 +1,22 @@
 // js/pdf.js
 import { BRAND } from "./config.js";
-import { classifyLossRatio, generateAlerts } from "./analytics.js";
+import {
+  classifyLossRatio,
+  generateAlerts,
+  generateInsights,
+  lossRatioIndicator,
+  generateLobRecommendations,
+} from "./analytics.js";
 import { renderBarChart, renderLineChart, renderPieChart } from "./charts.js";
-import { generateInsights } from "./analytics.js";
 
 const MARGIN_X = 15;
 const HEADER_HEIGHT = 30;
 const FOOTER_HEIGHT = 15;
+
+function drawSectionDivider(doc, y) {
+  doc.setDrawColor(220);
+  doc.line(MARGIN_X, y, doc.internal.pageSize.getWidth() - MARGIN_X, y);
+}
 
 function contentStartY() {
   return HEADER_HEIGHT + 8;
@@ -18,18 +28,54 @@ function contentEndY(doc) {
 
 /* ---------------- HEADER & FOOTER ---------------- */
 
+let LOGO_BASE64 = null;
+let LOGO_READY = false;
+
+async function loadLogo() {
+  const res = await fetch("/assets/logo.jpg");
+  const blob = await res.blob();
+
+  const reader = new FileReader();
+  reader.onloadend = () => {
+    LOGO_BASE64 = reader.result;
+    LOGO_READY = true;
+  };
+  reader.readAsDataURL(blob);
+}
+
+loadLogo();
+
 function drawHeader(doc) {
   const W = doc.internal.pageSize.getWidth();
 
+  // --- LOGO ---
+  if (LOGO_READY && LOGO_BASE64) {
+    doc.addImage(
+      LOGO_BASE64,
+      "JPEG", // IMPORTANT: must match logo.jpg
+      MARGIN_X,
+      8,
+      28,
+      12,
+    );
+  }
+
+  // --- RESET FONT AFTER IMAGE (CRITICAL FIX) ---
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text(BRAND.name, MARGIN_X, 16);
+  doc.setTextColor(0, 0, 0);
 
+  // --- BRAND NAME ---
+  doc.text(BRAND.name, MARGIN_X + 36, 16);
+
+  // --- DOCUMENT TITLE ---
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.text("Partner Performance Statement", W - MARGIN_X, 16, {
     align: "right",
   });
 
+  // --- DIVIDER ---
   doc.setDrawColor(200);
   doc.line(MARGIN_X, HEADER_HEIGHT - 4, W - MARGIN_X, HEADER_HEIGHT - 4);
 }
@@ -38,6 +84,7 @@ function drawFooter(doc, pageNo, totalPages) {
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
 
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(120);
   doc.text(BRAND.footer, MARGIN_X, H - 6);
@@ -103,11 +150,18 @@ export function renderPdf(snapshot) {
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text(
-    `Overall Risk Status: ${lrClass ? lrClass.label : "Not Available"}`,
-    MARGIN_X + 8,
-    y,
-  );
+  const indicator = lossRatioIndicator(snapshot.avg_loss_ratio);
+
+  // draw color box
+  doc.setFillColor(...indicator.color);
+  doc.rect(MARGIN_X, y - 4, 4, 4, "F");
+
+  // reset text color & font
+  doc.setTextColor(0);
+  doc.setFont("helvetica", "normal");
+
+  doc.text(`Overall Risk Status: ${indicator.label}`, MARGIN_X + 8, y);
+
   y += 6;
 
   doc.text(
@@ -151,12 +205,12 @@ export function renderPdf(snapshot) {
       ? "Portfolio performance is stable with healthy loss ratios."
       : lrClass.label === "Watchlist"
         ? "Portfolio shows early signs of stress and should be monitored closely."
-        : "Portfolio is high risk and requires immediate corrective action.";
+        : "Portfolio exhibits elevated risk levels and requires immediate corrective action.";
 
   doc.text(doc.splitTextToSize(narrative, CONTENT_W), MARGIN_X, y);
   y += 14;
 
-  /* ---- Intermediary Box ---- */
+  /* ---- Intermediary Box (Refactored & Safe) ---- */
 
   const boxX = MARGIN_X;
   const boxY = y;
@@ -167,37 +221,54 @@ export function renderPdf(snapshot) {
   const rightX = boxX + boxW / 2 + padding;
   const rightWidth = boxW / 2 - padding * 2;
 
-  // Prepare wrapped branch text
-  const branchText = snapshot.meta.branches?.length
-    ? snapshot.meta.branches.map((b) => `${b.name} (RM: ${b.rm})`).join(" | ")
-    : "—";
+  let leftY = boxY + 7;
+  let rightY = boxY + 7;
 
-  const wrappedBranches = doc.splitTextToSize(
-    `Branches / RM: ${branchText}`,
+  // LEFT COLUMN (always show intermediary)
+  doc.setFont("helvetica", "normal");
+  doc.text(`Intermediary: ${snapshot.meta.partner_name}`, leftX, leftY);
+  leftY += 6;
 
-    rightWidth,
-  );
+  // Optional: Code
+  if (snapshot.meta.partner_code) {
+    doc.text(`Code: ${snapshot.meta.partner_code}`, leftX, leftY);
+    leftY += 6;
+  }
 
-  // Calculate dynamic height
-  const lineHeight = 6;
-  const boxH = Math.max(
-    (2 + wrappedBranches.length) * lineHeight + padding * 2,
-    22,
-  );
+  // RIGHT COLUMN
 
-  // Draw box
+  // Optional: Category
+  if (snapshot.meta.category) {
+    doc.text(`Category: ${snapshot.meta.category}`, rightX, rightY);
+    rightY += 6;
+  }
+
+  // Optional: Branches / RM
+  if (snapshot.meta.branches?.length) {
+    const branchText = snapshot.meta.branches
+      .map((b) => `${b.name} (RM: ${b.rm})`)
+      .join(" | ");
+
+    const wrappedBranches = doc.splitTextToSize(
+      `Branches / RM: ${branchText}`,
+      rightWidth,
+    );
+
+    doc.text(wrappedBranches, rightX, rightY);
+    rightY += wrappedBranches.length * 6;
+  }
+
+  // Calculate box height AFTER content
+  const contentBottom = Math.max(leftY, rightY);
+  const boxH = Math.max(contentBottom - boxY + padding, 22);
+
+  // Draw box LAST
   doc.rect(boxX, boxY, boxW, boxH);
 
-  // Left column
-  doc.text(`Intermediary: ${snapshot.meta.partner_name}`, leftX, boxY + 7);
-  doc.text(`Code: ${snapshot.meta.partner_code || "—"}`, leftX, boxY + 13);
-
-  // Right column
-  doc.text(`Category: ${snapshot.meta.category || "—"}`, rightX, boxY + 7);
-  doc.text(wrappedBranches, rightX, boxY + 13);
-
+  // Move cursor
   y += boxH + 10;
 
+  // Continue with letter
   y = renderLetter(doc, snapshot, y, CONTENT_W);
 
   /* ===== PAGE 2 : BUSINESS SUMMARY ===== */
@@ -239,6 +310,9 @@ export function renderPdf(snapshot) {
       m.loss_ratio != null ? m.loss_ratio + "%" : "—",
     ]),
   });
+
+  drawSectionDivider(doc, y);
+  y += 8;
 
   /* ===== PAGE 3 : PORTFOLIO & TRENDS ===== */
 
@@ -291,6 +365,33 @@ export function renderPdf(snapshot) {
   );
 
   y += 50; // spacing after insights
+
+  /* ================= RECOMMENDATIONS ================= */
+
+  const recos = generateLobRecommendations(snapshot);
+
+  if (recos.length) {
+    if (y + 30 > contentEndY(doc)) {
+      doc.addPage();
+      drawHeader(doc);
+      y = contentStartY();
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Recommendations", MARGIN_X, y);
+    y += 6;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+
+    recos.forEach((r) => {
+      doc.text(`- ${r}`, MARGIN_X + 2, y);
+      y += 6;
+    });
+
+    y += 6;
+  }
 
   /* ---- Apply Footer Everywhere ---- */
 

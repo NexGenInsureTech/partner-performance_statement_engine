@@ -19,8 +19,8 @@ export function generateAlerts(months) {
 
     if (prev != null && curr != null && curr > prev) {
       alerts.push({
-        icon: "🔴",
-        message: `Loss ratio increased from ${prev}% to ${curr}% in ${sorted[i].month}`,
+        level: "HIGH", // semantic, not visual
+        message: `Loss ratio increased from ${prev}% to ${curr}% in ${sorted[i].month}.`,
       });
     }
   }
@@ -70,4 +70,36 @@ export function generateInsights(snapshot) {
   }
 
   return insights;
+}
+
+export function generateLobRecommendations(snapshot) {
+  const recos = [];
+
+  snapshot.lobs.forEach((lob) => {
+    if (lob.toLowerCase().includes("motor")) {
+      recos.push(
+        "Motor LOB: Focus on claims control and underwriting discipline.",
+      );
+    } else if (lob.toLowerCase().includes("health")) {
+      recos.push(
+        "Health LOB: Stable performance observed. Consider scaling with caution.",
+      );
+    } else if (lob.toLowerCase().includes("sme")) {
+      recos.push(
+        "SME LOB: Portfolio diversification and pricing review recommended.",
+      );
+    }
+  });
+
+  return recos;
+}
+
+export function lossRatioIndicator(value) {
+  if (typeof value !== "number") {
+    return { color: [150, 150, 150], label: "Not Available" };
+  }
+
+  if (value <= 60) return { color: [155, 187, 89], label: "Healthy" };
+  if (value <= 80) return { color: [247, 150, 70], label: "Watchlist" };
+  return { color: [192, 80, 77], label: "High Risk" };
 }
