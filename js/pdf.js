@@ -145,7 +145,7 @@ export function renderPdf(snapshot) {
   drawHeader(doc);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
+  doc.setFontSize(16);
   doc.text("Executive Summary", MARGIN_X, y);
   y += 8;
 
@@ -284,7 +284,7 @@ export function renderPdf(snapshot) {
   y = contentStartY();
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
+  doc.setFontSize(16);
   doc.text("Business Summary", MARGIN_X, y);
   y += 10;
 
@@ -428,6 +428,11 @@ export function renderPdf(snapshot) {
   }
 
   y += 6;
+
+  /* ===== PAGE 4 : DIAGNOSTIC CONTEXT ===== */
+  doc.addPage();
+  drawHeader(doc);
+  y = contentStartY();
 
   // ==================================================
   // PORTFOLIO CONTEXT (DE-EMPHASIZED BUT EXPLAINED)
