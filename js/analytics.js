@@ -126,3 +126,13 @@ export function generateLobInsights(snapshot) {
 
   return insights;
 }
+
+// analytics.js
+export function derivePartnerCategory(snapshot) {
+  const premium = snapshot.totals.premium;
+  const lossRatio = snapshot.avg_loss_ratio;
+
+  if (premium >= 5000000 && lossRatio <= 65) return "Gold";
+  if (premium >= 2000000 && lossRatio <= 75) return "Silver";
+  return "Bronze";
+}

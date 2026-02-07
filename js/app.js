@@ -14,7 +14,7 @@ const AUTO_MAP_RULES = {
   partner_code: ["partner code", "intermediary code", "code"],
   category: ["category", "tier", "grade"],
   branch: ["branch", "location", "office"],
-  rm: ["rm", "relationship manager", "account manager"],
+  rm: ["relationship manager", "account manager", "rm", "ba"],
   month: ["month", "period", "policy month"],
   lob: ["lob", "line of business", "business line"],
   product: ["product", "plan", "scheme"],
@@ -23,6 +23,7 @@ const AUTO_MAP_RULES = {
   commission: ["commission", "brokerage"],
   loss_ratio: ["loss ratio", "lr"],
 };
+``;
 
 // ================= AUTO-DETECT FUNCTION =================
 
@@ -31,11 +32,15 @@ function autoDetectField(field, headers) {
 
   const normalizedHeaders = headers.map((h) => ({
     raw: h,
-    norm: h.toLowerCase(),
+    // norm: h.toLowerCase(),
+    norm: h.toLowerCase().replace(/[_\-]/g, " "),
   }));
 
   for (const rule of rules) {
-    const match = normalizedHeaders.find((h) => h.norm.includes(rule));
+    const match = normalizedHeaders.find((h) =>
+      h.norm.includes(rule.toLowerCase()),
+    );
+
     if (match) return match.raw;
   }
 
@@ -204,6 +209,9 @@ document.getElementById("loadBtn").onclick = async () => {
     "loss_ratio",
   ];
 
+  // Track which headers are already auto-mapped
+  const usedHeaders = new Set();
+
   FIELDS.forEach((field) => {
     const label = document.createElement("div");
     label.className = "fw-bold mt-2";
@@ -212,32 +220,78 @@ document.getElementById("loadBtn").onclick = async () => {
     const select = document.createElement("select");
     select.className = "form-select mb-2";
 
-    // ✅ 1. Placeholder FIRST (CRITICAL)
+    // 1️⃣ Placeholder FIRST
     select.add(new Option("-- Select column --", ""));
 
-    // ✅ 2. Add all headers
+    // 2️⃣ Add all headers
     headers.forEach((h) => {
       select.add(new Option(h, h));
     });
 
-    // ✅ 3. Auto-detect
-    const detected = autoDetectField(field, headers);
+    // 3️⃣ AUTO-DETECT (exact match first, then fuzzy)
+    let detected = null;
+    const rules = AUTO_MAP_RULES[field] || [];
 
+    const normalizedHeaders = headers.map((h) => ({
+      raw: h,
+      norm: h.toLowerCase().replace(/[_\-]/g, " "),
+    }));
+
+    // ---- Pass 1: EXACT MATCH (critical for RM) ----
+    for (const rule of rules) {
+      const ruleNorm = rule.toLowerCase();
+      const exact = normalizedHeaders.find(
+        (h) => !usedHeaders.has(h.raw) && h.norm === ruleNorm,
+      );
+      if (exact) {
+        detected = exact.raw;
+        break;
+      }
+    }
+
+    // ---- Pass 2: FUZZY MATCH (fallback) ----
+    if (!detected) {
+      for (const rule of rules) {
+        const ruleNorm = rule.toLowerCase();
+        const fuzzy = normalizedHeaders.find(
+          (h) => !usedHeaders.has(h.raw) && h.norm.includes(ruleNorm),
+        );
+        if (fuzzy) {
+          detected = fuzzy.raw;
+          break;
+        }
+      }
+    }
+
+    // 4️⃣ Apply detection
     if (detected) {
       select.value = detected;
       state.columnMap[field] = detected;
+      usedHeaders.add(detected); // 🔑 CRITICAL FIX
     } else {
       select.value = "";
       state.columnMap[field] = "";
     }
 
-    // ✅ 4. Persist user selection
+    // 5️⃣ Persist manual changes
     select.onchange = () => {
+      // Remove old usage if changed
+      Object.keys(state.columnMap).forEach((k) => {
+        if (state.columnMap[k] === select.value && k !== field) {
+          state.columnMap[k] = "";
+        }
+      });
+
       state.columnMap[field] = select.value;
+
+      if (select.value) {
+        usedHeaders.add(select.value);
+      }
     };
 
     mappingUI.append(label, select);
   });
+
   await setProgress(progressBar, 40);
 };
 

@@ -7,6 +7,7 @@ import {
   lossRatioIndicator,
   generateLobRecommendations,
   generateLobInsights,
+  derivePartnerCategory,
 } from "./analytics.js";
 import {
   renderBarChart,
@@ -18,6 +19,55 @@ import {
 const MARGIN_X = 15;
 const HEADER_HEIGHT = 30;
 const FOOTER_HEIGHT = 15;
+
+const CATEGORY_BADGE = {
+  gold: { bg: [255, 248, 220], text: [160, 120, 0] },
+  silver: { bg: [240, 240, 240], text: [90, 90, 90] },
+  bronze: { bg: [245, 235, 225], text: [120, 80, 40] },
+};
+
+function normalizeCategory(label) {
+  return String(label || "")
+    .trim()
+    .toLowerCase();
+}
+
+function resolveCategoryStyle(label) {
+  const key = normalizeCategory(label);
+  return (
+    CATEGORY_BADGE[key] || {
+      bg: [245, 245, 245],
+      text: [100, 100, 100],
+    }
+  );
+}
+
+function drawCategoryBadge(doc, label, x, y) {
+  const style = resolveCategoryStyle(label);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+
+  const paddingX = 4;
+  const badgeH = 6;
+  const textWidth = doc.getTextWidth(label);
+  const badgeW = textWidth + paddingX * 2;
+
+  // Background
+  doc.setFillColor(style.bg[0], style.bg[1], style.bg[2]);
+  doc.roundedRect(x, y - badgeH + 1, badgeW, badgeH, 2, 2, "F");
+
+  // Text
+  doc.setTextColor(style.text[0], style.text[1], style.text[2]);
+  doc.text(label, x + paddingX, y);
+
+  // Reset state
+  doc.setTextColor(0);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+
+  return badgeW;
+}
 
 function drawSectionDivider(doc, y) {
   doc.setDrawColor(220);
@@ -159,7 +209,7 @@ export function renderPdf(snapshot) {
   const indicator = lossRatioIndicator(snapshot.avg_loss_ratio);
 
   // draw color box
-  doc.setFillColor(...indicator.color);
+  doc.setFillColor(indicator.color[0], indicator.color[1], indicator.color[2]);
   doc.rect(MARGIN_X, y - 4, 4, 4, "F");
 
   // reset text color & font
@@ -183,7 +233,7 @@ export function renderPdf(snapshot) {
 
   // Benchmark comparison
   if (
-    snapshot.benchmark?.avg_loss_ratio != null &&
+    snapshot.benchmark && snapshot.benchmark.avg_loss_ratio != null &&
     typeof snapshot.avg_loss_ratio === "number"
   ) {
     const diff = snapshot.avg_loss_ratio - snapshot.benchmark.avg_loss_ratio;
@@ -216,7 +266,9 @@ export function renderPdf(snapshot) {
   doc.text(doc.splitTextToSize(narrative, CONTENT_W), MARGIN_X, y);
   y += 14;
 
-  /* ---- Intermediary Box (Refactored & Safe) ---- */
+  /* --------------------------- */
+  /* ---- Intermediary Box ---- */
+  /* --------------------------- */
 
   const boxX = MARGIN_X;
   const boxY = y;
@@ -245,8 +297,26 @@ export function renderPdf(snapshot) {
 
   // Optional: Category
   if (snapshot.meta.category) {
-    doc.text(`Category: ${snapshot.meta.category}`, rightX, rightY);
-    rightY += 6;
+    snapshot.meta.category = derivePartnerCategory(snapshot);
+    // 1. Draw label
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text("Category: ", rightX, rightY);
+
+    // 2. Measure label width
+    const labelWidth = doc.getTextWidth("Category:");
+
+    // 3. Draw badge
+    drawCategoryBadge(
+      doc,
+      snapshot.meta.category,
+      rightX + labelWidth + 4,
+      rightY,
+    );
+
+    // 4. Move cursor
+    rightY += 8;
   }
 
   // Optional: Branches / RM
