@@ -20,7 +20,9 @@
 
   <body class="container py-4">
     <h3>Partner Performance Statement Engine</h3>
-
+    <!-- ------------------------------ -->
+    <!-- Upload Registers -->
+    <!-- ------------------------------ -->
     <div class="card p-3 mb-3">
       <h5>1) Upload Registers</h5>
       <input id="premiumFile" type="file" class="form-control mb-2" />
@@ -35,8 +37,9 @@
         <div id="progressBar" class="progress-bar" style="width: 0%">0%</div>
       </div>
     </div>
-
-    <!-- Dashboard UI -->
+    <!-- ------------------------------ -->
+    <!-- Dashboard Summary -->
+    <!-- ------------------------------ -->
     <div class="card p-3 mb-3">
       <h5>Dashboard Summary</h5>
 
@@ -82,13 +85,17 @@
         <tbody id="dashTable"></tbody>
       </table>
     </div>
-
+    <!-- ------------------------------ -->
+    <!-- Column Mapping -->
+    <!-- ------------------------------ -->
     <div class="card p-3 mb-3">
       <h5>2) Column Mapping</h5>
       <div id="mappingUI"></div>
       <button id="processBtn" class="btn btn-success mt-2">Process Data</button>
     </div>
-
+    <!-- ------------------------------ -->
+    <!-- Preview PDF -->
+    <!-- ------------------------------ -->
     <div class="card p-3 mb-3">
       <h5>3) Preview</h5>
       <select id="partnerSelect" class="form-select mb-2"></select>
@@ -96,13 +103,16 @@
         Preview PDF
       </button>
     </div>
-
+    <!-- ------------------------------ -->
+    <!-- Bulk PDF -->
+    <!-- ------------------------------ -->
     <div class="card p-3">
       <h5>4) Bulk</h5>
       <button id="bulkBtn" class="btn btn-outline-success">Generate ZIP</button>
     </div>
-
-    <!-- App -->
+    <!-- ------------------------------ -->
+    <!-- App Script -->
+    <!-- ------------------------------ -->
     <script type="module" src="./js/state.js"></script>
     <script type="module" src="./js/app.js"></script>
     <script type="module" src="./js/app.js"></script>
