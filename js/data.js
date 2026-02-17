@@ -1,4 +1,4 @@
-import { derivePartnerCategory } from './analytics.js';
+import { derivePartnerCategory } from "./analytics.js";
 // js/data.js (DATA NORMALIZATION + MERGE)
 
 export function normalize(rows, map) {
@@ -54,6 +54,7 @@ export function buildSnapshots(rows, statementTill) {
           partner_name: r.intermediary,
           partner_code: r.partner_code || null,
           category: r.category || null,
+          rm_name: r.rm || null,
           branches: [],
           statement_till: statementTill,
         },

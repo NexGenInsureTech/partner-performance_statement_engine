@@ -23,8 +23,18 @@
 
     <div class="card p-3 mb-3">
       <h5>1) Upload Registers</h5>
-      <input id="premiumFile" type="file" class="form-control mb-2" />
-      <input id="commissionFile" type="file" class="form-control mb-2" />
+      <input
+        id="premiumFile"
+        type="file"
+        class="form-control mb-2"
+        accept=".xlsx, .xls"
+      />
+      <input
+        id="commissionFile"
+        type="file"
+        class="form-control mb-2"
+        accept=".xlsx, .xls"
+      />
       <input
         id="statementTill"
         class="form-control mb-2"
@@ -104,7 +114,6 @@
 
     <!-- App -->
     <script type="module" src="./js/state.js"></script>
-    <script type="module" src="./js/app.js"></script>
     <script type="module" src="./js/app.js"></script>
   </body>
 </html>

@@ -247,48 +247,97 @@ export function renderPdf(snapshot) {
         ? "Portfolio shows early signs of stress and should be monitored closely."
         : "Portfolio exhibits elevated risk levels and requires immediate corrective action.";
 
-  doc.setFont("helvetica", "normal");
+  doc.setFont("helvetica", "bold");
   doc.text(doc.splitTextToSize(narrative, cardW - 28), cardX + 14, cy);
+  // Reset font back to normal if needed for other text
+  doc.setFont("helvetica", "normal");
 
   y = cardY + CARD_HEIGHT + 10;
 
   /* ============================================================
-     INTERMEDIARY CONTEXT
-  ============================================================ */
+   INTERMEDIARY CONTEXT
+============================================================ */
   const boxX = MARGIN_X;
   const boxY = y;
   const boxW = CONTENT_W;
-  const padding = 4;
+  const padding = 6;
 
   const leftX = boxX + padding;
   const rightX = boxX + boxW / 2 + padding;
+  const columnWidth = boxW / 2 - padding * 2;
 
-  let leftY = boxY + 7;
-  let rightY = boxY + 7;
+  let leftY = boxY + 8;
+  let rightY = boxY + 8;
 
-  doc.text(`Intermediary: ${snapshot.meta.partner_name}`, leftX, leftY);
-  leftY += 6;
+  /* ---------- LEFT COLUMN : Identity ---------- */
 
+  // Intermediary Name
+  doc.setFont("helvetica", "bold");
+  doc.text("Intermediary:", leftX, leftY);
+
+  doc.setFont("helvetica", "normal");
+  doc.text(snapshot.meta.partner_name || "—", leftX + 32, leftY);
+  leftY += 8;
+
+  // Partner Code
   if (snapshot.meta.partner_code) {
-    doc.text(`Code: ${snapshot.meta.partner_code}`, leftX, leftY);
-    leftY += 6;
+    doc.setFont("helvetica", "bold");
+    doc.text("Code:", leftX, leftY);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(snapshot.meta.partner_code, leftX + 18, leftY);
+    leftY += 8;
   }
 
+  /* ---------- RIGHT COLUMN : Classification & RM ---------- */
+
+  // Category Badge
   if (snapshot.meta.category) {
+    doc.setFont("helvetica", "bold");
     doc.text("Category:", rightX, rightY);
+
+    const labelWidth = doc.getTextWidth("Category:");
     drawCategoryBadge(
       doc,
       snapshot.meta.category,
-      rightX + doc.getTextWidth("Category:") + 4,
+      rightX + labelWidth + 6,
       rightY,
     );
-    rightY += 8;
+
+    rightY += 10;
   }
 
-  const boxH = Math.max(leftY, rightY) - boxY + padding;
-  doc.rect(boxX, boxY, boxW, boxH);
-  y += boxH + 10;
+  // Relationship Managers (one per line with branch)
+  if (snapshot.meta.branches?.length) {
+    const validPairs = snapshot.meta.branches.filter((b) => b.rm && b.name);
 
+    if (validPairs.length) {
+      doc.setFont("helvetica", "bold");
+      doc.text("Relationship Managers:", rightX, rightY);
+      rightY += 7;
+
+      doc.setFont("helvetica", "normal");
+
+      validPairs.forEach((b) => {
+        const line = `• ${b.rm} (${b.name})`;
+        const wrapped = doc.splitTextToSize(line, columnWidth);
+        doc.text(wrapped, rightX, rightY);
+        rightY += wrapped.length * 6;
+      });
+    }
+  }
+
+  /* ---------- DRAW CONTAINER ---------- */
+
+  const contentBottom = Math.max(leftY, rightY);
+  const boxH = contentBottom - boxY + padding;
+
+  doc.setDrawColor(210);
+  doc.rect(boxX, boxY, boxW, boxH);
+
+  y += boxH + 12;
+
+  /* ---------- CONTINUE DOCUMENT ---------- */
   y = renderLetter(doc, snapshot, y, CONTENT_W);
 
   /* ============================================================
@@ -304,7 +353,11 @@ export function renderPdf(snapshot) {
   y += 6;
 
   const lobBar = renderLobBarChart(snapshot.lob_summary);
-  doc.addImage(lobBar, "PNG", MARGIN_X, y, CONTENT_W, 70);
+  const imgProps = doc.getImageProperties(lobBar);
+  const pdfWidth = CONTENT_W;
+  const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+  doc.addImage(lobBar, "JPEG", MARGIN_X, y, pdfWidth, pdfHeight);
 
   /* ============================================================
      PAGE 3 : KEY PERFORMANCE SIGNALS & ACTIONS
